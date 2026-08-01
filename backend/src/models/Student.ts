@@ -4,8 +4,10 @@ export type StudentStatus = "active" | "inactive";
 
 export interface IStudent extends Document {
   organizationId: Types.ObjectId;
+  admissionNo?: string;
   name: string;
   grade: string;
+  section?: string;
   parentName: string;
   parentPhone: string;
   address?: string;
@@ -16,8 +18,10 @@ export interface IStudent extends Document {
 const studentSchema = new Schema<IStudent>(
   {
     organizationId: { type: Schema.Types.ObjectId, ref: "Organization", required: true },
+    admissionNo: { type: String, trim: true },
     name: { type: String, required: true },
     grade: { type: String, required: true },
+    section: { type: String, trim: true },
     parentName: { type: String, required: true },
     parentPhone: { type: String, required: true },
     address: { type: String },
@@ -29,6 +33,10 @@ const studentSchema = new Schema<IStudent>(
 
 studentSchema.index({ organizationId: 1, status: 1 });
 studentSchema.index({ organizationId: 1, grade: 1 });
+studentSchema.index(
+  { organizationId: 1, admissionNo: 1 },
+  { unique: true, sparse: true }
+);
 studentSchema.index(
   { organizationId: 1, name: "text" },
   {

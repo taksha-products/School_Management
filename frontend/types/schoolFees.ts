@@ -20,6 +20,8 @@ export interface FeeStructure {
   isActive: boolean;
 }
 
+import type { OrganizationFeatures } from "@/types/organization";
+
 export interface Organization {
   _id: string;
   name: string;
@@ -27,9 +29,10 @@ export interface Organization {
   address?: string;
   phone?: string;
   email?: string;
-  plan: "trial" | "basic" | "pro";
+  plan: "trial" | "basic" | "pro" | "cancelled";
   isActive: boolean;
   studentCount?: number;
+  features?: OrganizationFeatures;
   createdAt?: string;
 }
 
@@ -106,6 +109,32 @@ export interface OutstandingStudent {
   totalPaid: number;
   balance: number;
   overdueAmount: number;
+}
+
+export interface StudentFeeStatusEntry {
+  balance: number;
+  assigned: boolean;
+}
+
+export type StudentFeeStatusMap = Record<string, StudentFeeStatusEntry>;
+
+export interface AssignFeeStructurePreview {
+  total: number;
+  toAssign: number;
+  skipped: number;
+}
+
+export interface AssignFeeStructureResult {
+  assigned: number;
+  skipped: number;
+  ledgerEntriesCreated: number;
+}
+
+export interface AssignFeeStructurePayload {
+  feeStructureId: string;
+  academicYear: string;
+  grades?: string[];
+  studentIds?: string[];
 }
 
 export interface SchoolFeePayment {

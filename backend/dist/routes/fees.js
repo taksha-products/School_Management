@@ -9,6 +9,7 @@ const roleCheck_1 = require("../middleware/roleCheck");
 const FeeGroup_1 = require("../models/FeeGroup");
 const FeePayment_1 = require("../models/FeePayment");
 const Student_1 = require("../models/Student");
+const StudentTransport_1 = require("../models/StudentTransport");
 const asyncHandler_1 = require("../utils/asyncHandler");
 const cache_1 = require("../utils/cache");
 const orgFilter_1 = require("../utils/orgFilter");
@@ -61,33 +62,34 @@ const allowFeeRead = (req, res, next) => {
     (0, roleCheck_1.isSuperAdminOrOrgStaffAny)("canCollectFees", "canViewReports")(req, res, next);
 };
 const generateMonthlyFeePayments = async (organizationId, month, academicYear) => {
-    const studentFilter = {
+    const transportFilter = {
         organizationId: new mongoose_1.Types.ObjectId(organizationId),
         status: "active"
     };
     if (academicYear) {
-        studentFilter.academicYear = academicYear;
+        transportFilter.academicYear = academicYear;
     }
-    const students = await Student_1.Student.find(studentFilter);
+    const transports = await StudentTransport_1.StudentTransport.find(transportFilter);
     const nowMonthKey = new Date().toISOString().slice(0, 7);
     let createdCount = 0;
     let updatedCount = 0;
-    for (const student of students) {
+    for (const transport of transports) {
         const existing = await FeePayment_1.FeePayment.findOne({
-            organizationId: student.organizationId,
-            studentId: student._id,
+            organizationId: transport.organizationId,
+            studentId: transport.studentId,
             month,
-            academicYear: student.academicYear
+            academicYear: transport.academicYear
         });
         if (!existing) {
             const status = month < nowMonthKey ? "overdue" : "pending";
             await FeePayment_1.FeePayment.create({
-                organizationId: student.organizationId,
-                studentId: student._id,
-                busId: student.busId,
+                organizationId: transport.organizationId,
+                studentId: transport.studentId,
+                busId: transport.busId,
+                transportId: transport._id,
                 month,
-                academicYear: student.academicYear,
-                amount: student.monthlyFee,
+                academicYear: transport.academicYear,
+                amount: transport.monthlyTransportFee,
                 amountPaid: 0,
                 status
             });
@@ -99,28 +101,52 @@ const generateMonthlyFeePayments = async (organizationId, month, academicYear) =
             updatedCount += 1;
         }
     }
-    return { createdCount, updatedCount, totalStudents: students.length };
+    return { createdCount, updatedCount, totalStudents: transports.length };
 };
 feesRouter.get("/", ...scopeMiddleware, allowFeeRead, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     const authReq = req;
-    const { month, busId } = req.query;
+    const { month, busId, academicYear, status } = req.query;
     if (!month) {
         res.status(400).json({ success: false, data: null, message: "month is required" });
         return;
     }
-    const filter = { ...(0, orgFilter_1.orgFilter)(authReq, res), month };
-    if (busId) {
+    const orgId = (0, orgFilter_1.getScopedOrganizationId)(authReq, res);
+    const transportFilter = {
+        organizationId: new mongoose_1.Types.ObjectId(orgId),
+        status: "active"
+    };
+    if (busId && mongoose_1.Types.ObjectId.isValid(busId)) {
+        transportFilter.busId = new mongoose_1.Types.ObjectId(busId);
+    }
+    if (academicYear) {
+        transportFilter.academicYear = academicYear;
+    }
+    const activeTransports = await StudentTransport_1.StudentTransport.find(transportFilter).select("studentId");
+    const transportStudentIds = activeTransports.map((t) => t.studentId);
+    const filter = {
+        ...(0, orgFilter_1.orgFilter)(authReq, res),
+        month,
+        studentId: { $in: transportStudentIds }
+    };
+    if (busId && mongoose_1.Types.ObjectId.isValid(busId)) {
         filter.busId = busId;
+    }
+    if (status === "pending") {
+        filter.status = { $in: ["pending", "overdue"] };
+    }
+    else if (status) {
+        filter.status = status;
     }
     if (authReq.user?.role === "parent") {
         const parentIds = authReq.user.parentStudentIds ?? [];
-        filter.studentId = { $in: parentIds.map((id) => new mongoose_1.Types.ObjectId(id)) };
+        filter.studentId = {
+            $in: transportStudentIds.filter((id) => parentIds.includes(String(id)))
+        };
     }
-    const orgId = (0, orgFilter_1.getScopedOrganizationId)(authReq, res);
     const existingCount = await FeePayment_1.FeePayment.countDocuments(filter);
-    if (existingCount === 0 && authReq.user?.role !== "parent") {
-        await generateMonthlyFeePayments(orgId, month);
-        (0, cache_1.invalidateOrgReportsCache)(orgId);
+    if (existingCount === 0 && authReq.user?.role !== "parent" && transportStudentIds.length > 0) {
+        await generateMonthlyFeePayments(orgId, month, academicYear);
+        await (0, cache_1.invalidateOrgReportsCache)(orgId);
     }
     const { page, limit } = (0, paginate_1.parsePaginationQuery)(req.query, 50);
     const { data, pagination } = await (0, paginate_1.paginate)(FeePayment_1.FeePayment, filter, {
@@ -128,8 +154,9 @@ feesRouter.get("/", ...scopeMiddleware, allowFeeRead, (0, asyncHandler_1.asyncHa
         limit,
         sort: { createdAt: -1 },
         populate: [
-            { path: "studentId", select: "name grade monthlyFee" },
-            { path: "busId", select: "busNumber" }
+            { path: "studentId", select: "name grade" },
+            { path: "busId", select: "busNumber" },
+            { path: "transportId", select: "monthlyTransportFee pickupStop" }
         ]
     });
     res.json({
@@ -155,12 +182,27 @@ feesRouter.post("/record", ...scopeMiddleware, (0, roleCheck_1.isSuperAdminOrOrg
         res.status(404).json({ success: false, data: null, message: "Student not found" });
         return;
     }
-    const monthlyFee = student.monthlyFee;
+    const transport = await StudentTransport_1.StudentTransport.findOne({
+        ...(0, orgFilter_1.orgFilter)(authReq, res),
+        studentId: student._id,
+        status: "active",
+        academicYear
+    });
+    if (!transport) {
+        res.status(400).json({
+            success: false,
+            data: null,
+            message: "This student is not registered for bus transport"
+        });
+        return;
+    }
+    const monthlyFee = transport.monthlyTransportFee;
     const status = amountPaid >= monthlyFee ? "paid" : amountPaid > 0 ? "partial" : "pending";
     const payment = await FeePayment_1.FeePayment.findOneAndUpdate({ studentId, month, academicYear }, {
         organizationId: student.organizationId,
         studentId,
-        busId: student.busId,
+        busId: transport.busId,
+        transportId: transport._id,
         month,
         academicYear,
         amount: monthlyFee,
@@ -170,10 +212,10 @@ feesRouter.post("/record", ...scopeMiddleware, (0, roleCheck_1.isSuperAdminOrOrg
         collectedBy: authReq.user?.userId,
         paymentType: "single"
     }, { new: true, upsert: true, setDefaultsOnInsert: true })
-        .populate("studentId", "name grade monthlyFee")
+        .populate("studentId", "name grade")
         .populate("busId", "busNumber")
         .populate("collectedBy", "name role");
-    (0, cache_1.invalidateOrgReportsCache)(String(student.organizationId));
+    await (0, cache_1.invalidateOrgReportsCache)(String(student.organizationId));
     res.json({ success: true, data: payment, message: "Fee payment recorded successfully" });
 }));
 feesRouter.post("/record-advance", ...scopeMiddleware, (0, roleCheck_1.isSuperAdminOrOrgStaff)("canCollectFees"), (0, asyncHandler_1.asyncHandler)(async (req, res) => {
@@ -213,7 +255,21 @@ feesRouter.post("/record-advance", ...scopeMiddleware, (0, roleCheck_1.isSuperAd
         });
         return;
     }
-    const monthlyFee = student.monthlyFee;
+    const transport = await StudentTransport_1.StudentTransport.findOne({
+        ...(0, orgFilter_1.orgFilter)(authReq, res),
+        studentId: student._id,
+        status: "active",
+        academicYear
+    });
+    if (!transport) {
+        res.status(400).json({
+            success: false,
+            data: null,
+            message: "This student is not registered for bus transport"
+        });
+        return;
+    }
+    const monthlyFee = transport.monthlyTransportFee;
     const totalDue = monthlyFee * sortedMonths.length;
     const alreadyPaid = await FeePayment_1.FeePayment.findOne({
         ...(0, orgFilter_1.orgFilter)(authReq, res),
@@ -234,7 +290,8 @@ feesRouter.post("/record-advance", ...scopeMiddleware, (0, roleCheck_1.isSuperAd
     const feeGroupDoc = await FeeGroup_1.FeeGroup.create({
         organizationId: student.organizationId,
         studentId: student._id,
-        busId: student.busId,
+        busId: transport.busId,
+        transportId: transport._id,
         months: sortedMonths,
         totalAmount: amountPaid,
         totalDue,
@@ -263,7 +320,8 @@ feesRouter.post("/record-advance", ...scopeMiddleware, (0, roleCheck_1.isSuperAd
         const updated = await FeePayment_1.FeePayment.findOneAndUpdate({ studentId: student._id, month, academicYear }, {
             organizationId: student.organizationId,
             studentId: student._id,
-            busId: student.busId,
+            busId: transport.busId,
+            transportId: transport._id,
             month,
             academicYear,
             amount: monthlyFee,
@@ -275,7 +333,7 @@ feesRouter.post("/record-advance", ...scopeMiddleware, (0, roleCheck_1.isSuperAd
             feeGroupId: feeGroupDoc._id,
             paymentType: "advance"
         }, { new: true, upsert: true, setDefaultsOnInsert: true })
-            .populate("studentId", "name grade monthlyFee")
+            .populate("studentId", "name grade")
             .populate("busId", "busNumber")
             .populate("collectedBy", "name role");
         if (updated) {
@@ -283,7 +341,7 @@ feesRouter.post("/record-advance", ...scopeMiddleware, (0, roleCheck_1.isSuperAd
         }
     }
     const feeGroup = await FeeGroup_1.FeeGroup.findById(feeGroupDoc._id).populate("collectedBy", "name");
-    (0, cache_1.invalidateOrgReportsCache)(String(student.organizationId));
+    await (0, cache_1.invalidateOrgReportsCache)(String(student.organizationId));
     res.status(201).json({
         success: true,
         data: { feeGroup, payments: paymentsOut },
@@ -339,7 +397,7 @@ feesRouter.get("/generate-monthly", ...scopeMiddleware, (0, roleCheck_1.isSuperA
     const orgId = (0, orgFilter_1.getScopedOrganizationId)(authReq, res);
     const { createdCount, updatedCount, totalStudents } = await generateMonthlyFeePayments(orgId, month, academicYear);
     if (createdCount > 0 || updatedCount > 0) {
-        (0, cache_1.invalidateOrgReportsCache)(orgId);
+        await (0, cache_1.invalidateOrgReportsCache)(orgId);
     }
     res.json({
         success: true,
@@ -349,21 +407,23 @@ feesRouter.get("/generate-monthly", ...scopeMiddleware, (0, roleCheck_1.isSuperA
 }));
 const buildReceiptData = async (paymentId, orgScopeFilter) => {
     const payment = await FeePayment_1.FeePayment.findOne({ _id: paymentId, ...orgScopeFilter })
-        .populate("studentId", "name monthlyFee grade")
+        .populate("studentId", "name grade")
         .populate("busId", "busNumber")
+        .populate("transportId", "monthlyTransportFee")
         .populate("collectedBy", "name");
     if (!payment) {
         return null;
     }
     const student = payment.studentId;
     const bus = payment.busId;
+    const transport = payment.transportId;
     const collector = payment.collectedBy;
     const base = {
         studentName: student?.name,
         grade: student?.grade,
         busNumber: bus?.busNumber,
         month: payment.month,
-        monthlyFee: student?.monthlyFee ?? payment.amount,
+        monthlyFee: transport?.monthlyTransportFee ?? payment.amount,
         amountPaid: payment.amountPaid,
         status: payment.status,
         paidAt: payment.paidAt,

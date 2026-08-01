@@ -7,7 +7,7 @@ import type { JSX, ReactNode } from "react";
 import { Header } from "@/components/layout/Header";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { adminNav } from "@/components/layout/adminNav";
-import { getUser, getToken } from "@/lib/auth";
+import { bootstrapSession } from "@/lib/auth";
 
 interface AdminLayoutProps {
   children: ReactNode;
@@ -18,13 +18,13 @@ const AdminLayout = ({ children }: AdminLayoutProps): JSX.Element => {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const token = getToken();
-    const user = getUser();
-    if (!token || user?.role !== "orgAdmin") {
-      router.replace("/login");
-      return;
-    }
-    setReady(true);
+    void bootstrapSession().then((user) => {
+      if (!user || user.role !== "orgAdmin") {
+        router.replace("/login");
+        return;
+      }
+      setReady(true);
+    });
   }, [router]);
 
   if (!ready) {

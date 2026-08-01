@@ -1,7 +1,10 @@
 import { model, Schema, type Document, type Types } from "mongoose";
 
-export type SchoolPaymentMode = "cash" | "upi" | "cheque" | "online";
+import type { PaymentMode } from "../types/payment";
+
 export type FeeHeadPaymentStatus = "paid" | "partial";
+
+export type SchoolPaymentStatus = "pending" | "completed";
 
 export interface IFeeHeadPayment {
   feeHeadName: string;
@@ -18,7 +21,8 @@ export interface ISchoolFeePayment extends Document {
   receiptNumber: string;
   academicYear: string;
   paymentDate: Date;
-  paymentMode: SchoolPaymentMode;
+  paymentMode: PaymentMode;
+  paymentStatus: SchoolPaymentStatus;
   upiTransactionId?: string;
   collectedBy: Types.ObjectId;
   feeHeadPayments: IFeeHeadPayment[];
@@ -26,6 +30,13 @@ export interface ISchoolFeePayment extends Document {
   totalAmountPaid: number;
   totalLateFee: number;
   notes?: string;
+  razorpayOrderId?: string;
+  razorpayPaymentId?: string;
+  razorpaySignature?: string;
+  transactionRef?: string;
+  collectedAt?: Date;
+  paymentNotes?: string;
+  webhookVerified: boolean;
 }
 
 const feeHeadPaymentSchema = new Schema<IFeeHeadPayment>(
@@ -49,8 +60,23 @@ const schoolFeePaymentSchema = new Schema<ISchoolFeePayment>(
     paymentDate: { type: Date, required: true, default: Date.now },
     paymentMode: {
       type: String,
-      enum: ["cash", "upi", "cheque", "online"],
+      enum: [
+        "cash",
+        "upi_office",
+        "upi_online",
+        "card",
+        "netbanking",
+        "cheque",
+        "other",
+        "upi",
+        "online"
+      ],
       default: "cash"
+    },
+    paymentStatus: {
+      type: String,
+      enum: ["pending", "completed"],
+      default: "completed"
     },
     upiTransactionId: { type: String },
     collectedBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
@@ -58,7 +84,14 @@ const schoolFeePaymentSchema = new Schema<ISchoolFeePayment>(
     totalAmountDue: { type: Number, required: true },
     totalAmountPaid: { type: Number, required: true },
     totalLateFee: { type: Number, default: 0 },
-    notes: { type: String }
+    notes: { type: String },
+    razorpayOrderId: { type: String },
+    razorpayPaymentId: { type: String },
+    razorpaySignature: { type: String },
+    transactionRef: { type: String },
+    collectedAt: { type: Date },
+    paymentNotes: { type: String, maxlength: 500 },
+    webhookVerified: { type: Boolean, default: false }
   },
   { timestamps: true }
 );
@@ -67,6 +100,8 @@ schoolFeePaymentSchema.index({ receiptNumber: 1 }, { unique: true });
 schoolFeePaymentSchema.index({ organizationId: 1, studentId: 1, paymentDate: -1 });
 schoolFeePaymentSchema.index({ organizationId: 1, paymentDate: -1 });
 schoolFeePaymentSchema.index({ organizationId: 1, collectedBy: 1 });
+schoolFeePaymentSchema.index({ razorpayOrderId: 1 }, { sparse: true });
+schoolFeePaymentSchema.index({ razorpayPaymentId: 1 }, { unique: true, sparse: true });
 
 export const SchoolFeePayment = model<ISchoolFeePayment>(
   "SchoolFeePayment",

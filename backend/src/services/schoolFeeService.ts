@@ -11,6 +11,103 @@ import {
   refreshOverdueStatuses
 } from "../utils/schoolFeeLedger";
 
+export interface StudentFeeStatusEntry {
+  balance: number;
+  assigned: boolean;
+}
+
+export type StudentFeeStatusMap = Record<string, StudentFeeStatusEntry>;
+
+export const buildStudentFeeStatusMap = async (
+  organizationId: string,
+  academicYear: string
+): Promise<StudentFeeStatusMap> => {
+  const organizationObjectId = new Types.ObjectId(organizationId);
+
+  await refreshOverdueStatuses({
+    organizationId: organizationObjectId,
+    academicYear
+  });
+
+  const [assignments, balanceRows] = await Promise.all([
+    StudentFeeAssignment.find({
+      organizationId: organizationObjectId,
+      academicYear,
+      isActive: true
+    }).select("studentId"),
+    FeeLedger.aggregate<{ _id: Types.ObjectId; balance: number }>([
+      { $match: { organizationId: organizationObjectId, academicYear } },
+      {
+        $group: {
+          _id: "$studentId",
+          balance: {
+            $sum: {
+              $max: [
+                0,
+                { $subtract: [{ $add: ["$amountDue", "$lateFee"] }, "$amountPaid"] }
+              ]
+            }
+          }
+        }
+      }
+    ])
+  ]);
+
+  const statusMap: StudentFeeStatusMap = {};
+
+  for (const assignment of assignments) {
+    const studentId = String(assignment.studentId);
+    statusMap[studentId] = { balance: 0, assigned: true };
+  }
+
+  for (const row of balanceRows) {
+    const studentId = String(row._id);
+    const existing = statusMap[studentId];
+    statusMap[studentId] = {
+      balance: row.balance,
+      assigned: existing?.assigned ?? false
+    };
+  }
+
+  return statusMap;
+};
+
+export const buildStudentFeeStatusMapsByYear = async (
+  organizationId: string,
+  academicYears: string[]
+): Promise<Map<string, StudentFeeStatusMap>> => {
+  const uniqueYears = [...new Set(academicYears.filter((year) => year.length > 0))];
+  const maps = await Promise.all(
+    uniqueYears.map(async (academicYear) => ({
+      academicYear,
+      statusMap: await buildStudentFeeStatusMap(organizationId, academicYear)
+    }))
+  );
+
+  return new Map(maps.map(({ academicYear, statusMap }) => [academicYear, statusMap]));
+};
+
+export const formatStudentFeeStatusLabel = (
+  entry: StudentFeeStatusEntry | undefined
+): { feeStatus: string; outstandingAmount: number } => {
+  if (!entry?.assigned) {
+    return { feeStatus: "Fees not assigned", outstandingAmount: 0 };
+  }
+  if (entry.balance <= 0) {
+    return { feeStatus: "All paid", outstandingAmount: 0 };
+  }
+
+  const rounded = Math.round(entry.balance * 100) / 100;
+  const formatted = new Intl.NumberFormat("en-IN", {
+    maximumFractionDigits: 0
+  }).format(rounded);
+
+  return {
+    feeStatus: `₹${formatted} due`,
+    outstandingAmount: rounded
+  };
+};
+
 export const buildStudentFeeLedgerView = async (
   organizationId: string,
   studentId: string,

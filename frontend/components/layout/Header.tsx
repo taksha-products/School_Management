@@ -97,7 +97,7 @@ export const Header = ({ portalLabel, welcomeName }: HeaderProps): JSX.Element =
                 type="button"
                 onClick={() => {
                   setMenuOpen(false);
-                  logout();
+                  void logout();
                 }}
                 className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50"
               >

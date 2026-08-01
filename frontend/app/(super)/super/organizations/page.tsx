@@ -6,6 +6,8 @@ import { useState } from "react";
 
 import { ListPagination } from "@/components/shared/ListPagination";
 import { PageWrapper } from "@/components/layout/PageWrapper";
+import { EditFeaturesModal } from "@/components/superadmin/EditFeaturesModal";
+import { DeleteOrganizationModal } from "@/components/superadmin/DeleteOrganizationModal";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Modal } from "@/components/ui/Modal";
@@ -18,6 +20,8 @@ const OrganizationsPage = (): JSX.Element => {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const [open, setOpen] = useState(false);
+  const [featuresOrg, setFeaturesOrg] = useState<Organization | null>(null);
+  const [deleteOrg, setDeleteOrg] = useState<Organization | null>(null);
   const [creds, setCreds] = useState<{ email: string; temporaryPassword: string } | null>(null);
   const [page, setPage] = useState(1);
   const [form, setForm] = useState({
@@ -55,6 +59,17 @@ const OrganizationsPage = (): JSX.Element => {
     onError: () => showToast("error", "Failed to create organization")
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => api.delete(`/api/superadmin/organizations/${id}`),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["super-orgs"] });
+      void queryClient.invalidateQueries({ queryKey: ["super-dashboard"] });
+      setDeleteOrg(null);
+      showToast("success", "Organization deactivated");
+    },
+    onError: () => showToast("error", "Failed to delete organization")
+  });
+
   const copyPassword = async () => {
     if (!creds?.temporaryPassword) return;
     await navigator.clipboard.writeText(creds.temporaryPassword);
@@ -75,16 +90,33 @@ const OrganizationsPage = (): JSX.Element => {
               <th>Plan</th>
               <th>Students</th>
               <th>Status</th>
+              <th className="p-2 text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
             {orgRows.map((org) => (
-              <tr key={org._id} className="border-t border-slate-100">
+              <tr
+                key={org._id}
+                className="cursor-pointer border-t border-slate-100 transition-colors hover:bg-slate-50"
+                onClick={() => setFeaturesOrg(org)}
+              >
                 <td className="p-2 font-medium">{org.name}</td>
                 <td>{org.code}</td>
                 <td className="capitalize">{org.plan}</td>
                 <td>{org.studentCount ?? 0}</td>
                 <td>{org.isActive ? "Active" : "Inactive"}</td>
+                <td className="p-2 text-right">
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDeleteOrg(org);
+                    }}
+                  >
+                    Delete
+                  </Button>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -121,6 +153,25 @@ const OrganizationsPage = (): JSX.Element => {
           </Button>
         </div>
       </Modal>
+
+      <EditFeaturesModal
+        organization={featuresOrg}
+        isOpen={!!featuresOrg}
+        onClose={() => setFeaturesOrg(null)}
+        onSaved={() => queryClient.invalidateQueries({ queryKey: ["super-orgs"] })}
+      />
+
+      <DeleteOrganizationModal
+        organization={deleteOrg}
+        isOpen={!!deleteOrg}
+        deleting={deleteMutation.isPending}
+        onClose={() => setDeleteOrg(null)}
+        onConfirm={() => {
+          if (deleteOrg) {
+            deleteMutation.mutate(deleteOrg._id);
+          }
+        }}
+      />
 
       <Modal isOpen={!!creds} title="Org Admin Credentials" onClose={() => setCreds(null)}>
         {creds && (

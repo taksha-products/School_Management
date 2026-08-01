@@ -1,7 +1,8 @@
 import type { NextFunction, Request, Response } from "express";
-import jwt, { type JwtPayload } from "jsonwebtoken";
+import jwt from "jsonwebtoken";
 
 import type { StaffPermissions, UserRole } from "../models/User";
+import { verifyAccessToken } from "../utils/jwt";
 
 export interface DecodedAuthUser {
   userId: string;
@@ -16,51 +17,75 @@ export interface AuthenticatedRequest extends Request {
   user?: DecodedAuthUser;
 }
 
+const extractBearerToken = (authorization: string | undefined): string | null => {
+  if (!authorization?.startsWith("Bearer ")) {
+    return null;
+  }
+  return authorization.slice("Bearer ".length);
+};
+
+const extractAccessToken = (req: Request): string | null => {
+  const cookieToken = req.cookies?.access_token as string | undefined;
+  if (cookieToken) {
+    return cookieToken;
+  }
+
+  const isMobileClient = req.headers["x-api-client"] === "mobile";
+  if (isMobileClient) {
+    return extractBearerToken(req.headers.authorization);
+  }
+
+  return null;
+};
+
+/**
+ * Authenticates requests via httpOnly access_token cookie.
+ * Bearer Authorization is accepted only when `x-api-client: mobile` is set.
+ */
 export const auth = (
   req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): void => {
-  const authorization = req.headers.authorization;
-  const token = authorization?.startsWith("Bearer ")
-    ? authorization.slice("Bearer ".length)
-    : null;
+  const token = extractAccessToken(req);
 
   if (!token) {
     res.status(401).json({
       success: false,
       data: null,
-      message: "Unauthorized: token missing"
+      message: "Unauthorized: token missing",
+      code: "TOKEN_INVALID"
     });
     return;
   }
 
   try {
-    const secret = process.env.JWT_SECRET;
-    if (!secret) {
-      res.status(500).json({
+    const decoded = verifyAccessToken(token);
+    req.user = {
+      userId: decoded.userId,
+      role: decoded.role as UserRole,
+      organizationId: decoded.organizationId,
+      name: decoded.name,
+      staffPermissions: decoded.staffPermissions ?? decoded.permissions,
+      parentStudentIds: decoded.parentStudentIds
+    };
+    next();
+  } catch (error) {
+    if (error instanceof jwt.TokenExpiredError) {
+      res.status(401).json({
         success: false,
         data: null,
-        message: "JWT secret is not configured"
+        message: "Access token expired",
+        code: "TOKEN_EXPIRED"
       });
       return;
     }
 
-    const decoded = jwt.verify(token, secret) as JwtPayload & DecodedAuthUser;
-    req.user = {
-      userId: decoded.userId,
-      role: decoded.role,
-      organizationId: decoded.organizationId ?? null,
-      name: decoded.name,
-      staffPermissions: decoded.staffPermissions,
-      parentStudentIds: decoded.parentStudentIds
-    };
-    next();
-  } catch {
     res.status(401).json({
       success: false,
       data: null,
-      message: "Unauthorized: invalid token"
+      message: "Unauthorized: invalid token",
+      code: "TOKEN_INVALID"
     });
   }
 };

@@ -3,16 +3,17 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { JSX, ReactNode } from "react";
-import { Building2, LayoutDashboard, Users } from "lucide-react";
+import { Building2, LayoutDashboard, Shield, Users } from "lucide-react";
 
 import { Header } from "@/components/layout/Header";
 import { Sidebar, type NavEntry } from "@/components/layout/Sidebar";
-import { getToken, getUser } from "@/lib/auth";
+import { bootstrapSession } from "@/lib/auth";
 
 const superNav: NavEntry[] = [
   { href: "/super/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/super/organizations", label: "Organizations", icon: Building2 },
-  { href: "/super/users", label: "All Users", icon: Users }
+  { href: "/super/users", label: "All Users", icon: Users },
+  { href: "/super/settings/security", label: "Security", icon: Shield }
 ];
 
 const SuperLayout = ({ children }: { children: ReactNode }): JSX.Element => {
@@ -20,13 +21,13 @@ const SuperLayout = ({ children }: { children: ReactNode }): JSX.Element => {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const token = getToken();
-    const user = getUser();
-    if (!token || user?.role !== "superAdmin") {
-      router.replace("/login");
-      return;
-    }
-    setReady(true);
+    void bootstrapSession().then((user) => {
+      if (!user || user.role !== "superAdmin") {
+        router.replace("/login");
+        return;
+      }
+      setReady(true);
+    });
   }, [router]);
 
   if (!ready) {

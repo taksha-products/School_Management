@@ -3,6 +3,7 @@ import {
   Bus,
   Coins,
   LayoutDashboard,
+  MapPin,
   Settings,
   Users,
   Wrench,
@@ -16,6 +17,7 @@ export const adminNavIconMap: Record<AdminNavIcon, LucideIcon> = {
   Users,
   Coins,
   Bus,
+  MapPin,
   ChartBar: BarChart3,
   Tools: Wrench,
   Settings

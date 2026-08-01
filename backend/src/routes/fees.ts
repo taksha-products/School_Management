@@ -195,7 +195,7 @@ feesRouter.get(
 
     if (existingCount === 0 && authReq.user?.role !== "parent" && transportStudentIds.length > 0) {
       await generateMonthlyFeePayments(orgId, month, academicYear);
-      invalidateOrgReportsCache(orgId);
+      await invalidateOrgReportsCache(orgId);
     }
 
     const { page, limit } = parsePaginationQuery(req.query, 50);
@@ -288,7 +288,7 @@ feesRouter.post(
       .populate("busId", "busNumber")
       .populate("collectedBy", "name role");
 
-    invalidateOrgReportsCache(String(student.organizationId));
+    await invalidateOrgReportsCache(String(student.organizationId));
     res.json({ success: true, data: payment, message: "Fee payment recorded successfully" });
   })
 );
@@ -450,7 +450,7 @@ feesRouter.post(
 
     const feeGroup = await FeeGroup.findById(feeGroupDoc._id).populate("collectedBy", "name");
 
-    invalidateOrgReportsCache(String(student.organizationId));
+    await invalidateOrgReportsCache(String(student.organizationId));
     res.status(201).json({
       success: true,
       data: { feeGroup, payments: paymentsOut },
@@ -531,7 +531,7 @@ feesRouter.get(
     );
 
     if (createdCount > 0 || updatedCount > 0) {
-      invalidateOrgReportsCache(orgId);
+      await invalidateOrgReportsCache(orgId);
     }
 
     res.json({

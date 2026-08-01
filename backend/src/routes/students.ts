@@ -17,10 +17,34 @@ import { validate } from "../middleware/validate";
 import { getScopedOrganizationId, orgFilter } from "../utils/orgFilter";
 import { createStudentValidation } from "../validators/students";
 import { paginate, parsePaginationQuery } from "../utils/paginate";
+import { sortGrades } from "../utils/gradeSort";
 
 const studentsRouter = Router();
 
 const scopeMiddleware = [auth, orgScope, requireOrgScope, canAccessOrg] as const;
+
+const MAX_BULK_DEACTIVATE = 500;
+
+function parseBulkStudentIds(
+  raw: unknown
+): { ok: true; ids: Types.ObjectId[] } | { ok: false; message: string } {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return { ok: false, message: "studentIds must be a non-empty array" };
+  }
+  if (raw.length > MAX_BULK_DEACTIVATE) {
+    return { ok: false, message: `Maximum ${MAX_BULK_DEACTIVATE} students per request` };
+  }
+
+  const ids: Types.ObjectId[] = [];
+  for (const id of raw) {
+    if (typeof id !== "string" || !Types.ObjectId.isValid(id)) {
+      return { ok: false, message: "All studentIds must be valid MongoDB ObjectId strings" };
+    }
+    ids.push(new Types.ObjectId(id));
+  }
+
+  return { ok: true, ids };
+}
 
 const allowStudentRead = (
   req: import("express").Request,
@@ -75,12 +99,13 @@ studentsRouter.get(
   allowStudentRead,
   asyncHandler(async (req, res) => {
     const authReq = req as AuthenticatedRequest;
-    const { busId, search, status, withTransport, academicYear } = req.query as {
+    const { busId, search, status, withTransport, academicYear, grade } = req.query as {
       busId?: string;
       search?: string;
       status?: string;
       withTransport?: string;
       academicYear?: string;
+      grade?: string;
     };
 
     const filter: Record<string, unknown> = {
@@ -90,6 +115,11 @@ studentsRouter.get(
 
     if (authReq.user?.role === "parent") {
       Object.assign(filter, parentStudentFilter(authReq));
+    }
+
+    const gradeFilter = typeof grade === "string" ? grade.trim() : "";
+    if (gradeFilter) {
+      filter.grade = gradeFilter;
     }
 
     if (busId && Types.ObjectId.isValid(busId)) {
@@ -156,6 +186,72 @@ studentsRouter.get(
       data,
       pagination,
       message: "Students fetched successfully"
+    });
+  })
+);
+
+studentsRouter.get(
+  "/grades",
+  ...scopeMiddleware,
+  allowStudentRead,
+  asyncHandler(async (req, res) => {
+    const authReq = req as AuthenticatedRequest;
+    const distinctGrades = await Student.distinct("grade", orgFilter(authReq, res));
+    const grades = sortGrades(
+      distinctGrades.filter((grade): grade is string => typeof grade === "string" && grade.trim().length > 0)
+    );
+
+    res.json({
+      success: true,
+      data: grades,
+      message: "Student grades fetched successfully"
+    });
+  })
+);
+
+studentsRouter.post(
+  "/bulk-deactivate",
+  ...scopeMiddleware,
+  isSuperAdminOrOrgStaff("canManageStudents"),
+  asyncHandler(async (req, res) => {
+    const authReq = req as AuthenticatedRequest;
+    const orgId = getScopedOrganizationId(authReq, res)!;
+    const { studentIds } = req.body as { studentIds?: unknown };
+    const parsed = parseBulkStudentIds(studentIds);
+
+    if (!parsed.ok) {
+      res.status(400).json({
+        success: false,
+        data: null,
+        message: parsed.message
+      });
+      return;
+    }
+
+    const organizationId = new Types.ObjectId(orgId);
+    const ownedCount = await Student.countDocuments({
+      _id: { $in: parsed.ids },
+      organizationId
+    });
+
+    if (ownedCount !== parsed.ids.length) {
+      res.status(400).json({
+        success: false,
+        data: null,
+        message: "One or more student IDs are invalid or do not belong to your organization"
+      });
+      return;
+    }
+
+    const result = await Student.updateMany(
+      { _id: { $in: parsed.ids }, organizationId },
+      { status: "inactive" }
+    );
+
+    res.json({
+      success: true,
+      data: { deactivated: result.modifiedCount },
+      message: `${result.modifiedCount} student(s) deactivated successfully`
     });
   })
 );

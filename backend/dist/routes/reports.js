@@ -7,6 +7,8 @@ const orgScope_1 = require("../middleware/orgScope");
 const requireOrgScope_1 = require("../middleware/requireOrgScope");
 const roleCheck_1 = require("../middleware/roleCheck");
 const Bus_1 = require("../models/Bus");
+const Student_1 = require("../models/Student");
+const StudentTransport_1 = require("../models/StudentTransport");
 const asyncHandler_1 = require("../utils/asyncHandler");
 const cache_1 = require("../utils/cache");
 const orgFilter_1 = require("../utils/orgFilter");
@@ -33,8 +35,8 @@ reportsRouter.get("/monthly", ...scopeMiddleware, allowReportRead, (0, asyncHand
         return;
     }
     const orgIdStr = (0, orgFilter_1.getScopedOrganizationId)(authReq, res);
-    const cacheKey = `${orgIdStr}:reports:monthly:${monthKey}`;
-    const cached = (0, cache_1.cacheGet)(cacheKey);
+    const cacheKey = (0, cache_1.orgCacheKey)(orgIdStr, `reports:monthly:${monthKey}`);
+    const cached = await (0, cache_1.getCached)(cacheKey);
     if (cached) {
         res.json({ success: true, data: cached, message: "Monthly report fetched successfully" });
         return;
@@ -47,7 +49,7 @@ reportsRouter.get("/monthly", ...scopeMiddleware, allowReportRead, (0, asyncHand
         { $match: { organizationId: orgId } },
         {
             $lookup: {
-                from: "students",
+                from: "studenttransports",
                 let: { busId: "$_id", orgId: "$organizationId" },
                 pipeline: [
                     {
@@ -62,7 +64,7 @@ reportsRouter.get("/monthly", ...scopeMiddleware, allowReportRead, (0, asyncHand
                             }
                         }
                     },
-                    { $project: { _id: 1, monthlyFee: 1 } }
+                    { $project: { _id: 1, monthlyTransportFee: 1 } }
                 ],
                 as: "students"
             }
@@ -113,7 +115,8 @@ reportsRouter.get("/monthly", ...scopeMiddleware, allowReportRead, (0, asyncHand
         },
         {
             $addFields: {
-                totalFeesDue: { $sum: "$students.monthlyFee" },
+                totalFeesDue: { $sum: "$students.monthlyTransportFee" },
+                transportStudentCount: { $size: "$students" },
                 totalFeesCollected: {
                     $sum: {
                         $map: {
@@ -153,12 +156,13 @@ reportsRouter.get("/monthly", ...scopeMiddleware, allowReportRead, (0, asyncHand
                 pendingCount: 1,
                 totalExpenses: 1,
                 netProfit: { $subtract: ["$totalFeesCollected", "$totalExpenses"] },
-                studentCount: 1
+                studentCount: 1,
+                transportStudentCount: 1
             }
         },
         { $sort: { busNumber: 1 } }
     ]);
-    (0, cache_1.cacheSet)(cacheKey, summary, 300);
+    await (0, cache_1.setCached)(cacheKey, summary, 300);
     res.json({ success: true, data: summary, message: "Monthly report fetched successfully" });
 }));
 reportsRouter.get("/bus/:id", ...scopeMiddleware, allowReportRead, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
@@ -178,8 +182,8 @@ reportsRouter.get("/bus/:id", ...scopeMiddleware, allowReportRead, (0, asyncHand
         return;
     }
     const orgIdStr = (0, orgFilter_1.getScopedOrganizationId)(authReq, res);
-    const cacheKey = `${orgIdStr}:reports:bus:${busIdParam}:${academicYear}`;
-    const cached = (0, cache_1.cacheGet)(cacheKey);
+    const cacheKey = (0, cache_1.orgCacheKey)(orgIdStr, `reports:bus:${busIdParam}:${academicYear}`);
+    const cached = await (0, cache_1.getCached)(cacheKey);
     if (cached) {
         res.json({ success: true, data: cached, message: "Bus trend fetched successfully" });
         return;
@@ -282,7 +286,7 @@ reportsRouter.get("/bus/:id", ...scopeMiddleware, allowReportRead, (0, asyncHand
             }
         }
     ]);
-    (0, cache_1.cacheSet)(cacheKey, trend, 600);
+    await (0, cache_1.setCached)(cacheKey, trend, 600);
     res.json({ success: true, data: trend, message: "Bus trend fetched successfully" });
 }));
 reportsRouter.get("/summary", ...scopeMiddleware, allowReportRead, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
@@ -297,8 +301,8 @@ reportsRouter.get("/summary", ...scopeMiddleware, allowReportRead, (0, asyncHand
         return;
     }
     const orgIdStr = (0, orgFilter_1.getScopedOrganizationId)(authReq, res);
-    const cacheKey = `${orgIdStr}:reports:summary:${month}`;
-    const cached = (0, cache_1.cacheGet)(cacheKey);
+    const cacheKey = (0, cache_1.orgCacheKey)(orgIdStr, `reports:summary:${month}`);
+    const cached = await (0, cache_1.getCached)(cacheKey);
     if (cached) {
         res.json({
             success: true,
@@ -311,6 +315,18 @@ reportsRouter.get("/summary", ...scopeMiddleware, allowReportRead, (0, asyncHand
     const start = new Date(`${month}-01T00:00:00.000Z`);
     const end = new Date(start);
     end.setUTCMonth(end.getUTCMonth() + 1);
+    const [totalSchoolStudents, onBusStudents] = await Promise.all([
+        Student_1.Student.countDocuments({
+            organizationId: orgId,
+            status: "active",
+            academicYear
+        }),
+        StudentTransport_1.StudentTransport.countDocuments({
+            organizationId: orgId,
+            status: "active",
+            academicYear
+        })
+    ]);
     const [summary] = await Bus_1.Bus.aggregate([
         { $match: { organizationId: orgId } },
         {
@@ -318,7 +334,7 @@ reportsRouter.get("/summary", ...scopeMiddleware, allowReportRead, (0, asyncHand
                 studentMetrics: [
                     {
                         $lookup: {
-                            from: "students",
+                            from: "studenttransports",
                             let: { busId: "$_id", orgId: "$organizationId" },
                             pipeline: [
                                 {
@@ -341,7 +357,7 @@ reportsRouter.get("/summary", ...scopeMiddleware, allowReportRead, (0, asyncHand
                     {
                         $group: {
                             _id: null,
-                            totalStudents: { $sum: "$studentCount" },
+                            transportStudents: { $sum: "$studentCount" },
                             busCount: { $sum: 1 }
                         }
                     }
@@ -403,8 +419,8 @@ reportsRouter.get("/summary", ...scopeMiddleware, allowReportRead, (0, asyncHand
         },
         {
             $project: {
-                totalStudents: {
-                    $ifNull: [{ $arrayElemAt: ["$studentMetrics.totalStudents", 0] }, 0]
+                transportStudents: {
+                    $ifNull: [{ $arrayElemAt: ["$studentMetrics.transportStudents", 0] }, 0]
                 },
                 busCount: { $ifNull: [{ $arrayElemAt: ["$studentMetrics.busCount", 0] }, 0] },
                 totalFeesCollected: {
@@ -421,14 +437,19 @@ reportsRouter.get("/summary", ...scopeMiddleware, allowReportRead, (0, asyncHand
             }
         }
     ]);
-    const data = summary ?? {
-        totalStudents: 0,
-        totalFeesCollected: 0,
-        totalExpenses: 0,
-        netProfit: 0,
-        busCount: 0
+    const data = {
+        ...(summary ?? {
+            transportStudents: 0,
+            totalFeesCollected: 0,
+            totalExpenses: 0,
+            netProfit: 0,
+            busCount: 0
+        }),
+        totalSchoolStudents,
+        onBusStudents,
+        totalStudents: totalSchoolStudents
     };
-    (0, cache_1.cacheSet)(cacheKey, data, 300);
+    await (0, cache_1.setCached)(cacheKey, data, 300);
     res.json({
         success: true,
         data,

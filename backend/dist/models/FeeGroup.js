@@ -6,6 +6,7 @@ const feeGroupSchema = new mongoose_1.Schema({
     organizationId: { type: mongoose_1.Schema.Types.ObjectId, ref: "Organization", required: true },
     studentId: { type: mongoose_1.Schema.Types.ObjectId, ref: "Student", required: true },
     busId: { type: mongoose_1.Schema.Types.ObjectId, ref: "Bus", required: true },
+    transportId: { type: mongoose_1.Schema.Types.ObjectId, ref: "StudentTransport" },
     months: [{ type: String, required: true }],
     totalAmount: { type: Number, required: true },
     totalDue: { type: Number, required: true },

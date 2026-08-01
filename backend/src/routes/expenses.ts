@@ -103,7 +103,7 @@ expensesRouter.post(
       addedBy: authReq.user?.userId
     };
     const expense = await Expense.create(payload);
-    invalidateOrgReportsCache(String(payload.organizationId));
+    await invalidateOrgReportsCache(String(payload.organizationId));
     res.status(201).json({ success: true, data: expense, message: "Expense created successfully" });
   })
 );
@@ -130,7 +130,7 @@ expensesRouter.put(
       res.status(404).json({ success: false, data: null, message: "Expense not found" });
       return;
     }
-    invalidateOrgReportsCache(String(expense.organizationId));
+    await invalidateOrgReportsCache(String(expense.organizationId));
     res.json({ success: true, data: expense, message: "Expense updated successfully" });
   })
 );
@@ -157,7 +157,7 @@ expensesRouter.delete(
       res.status(404).json({ success: false, data: null, message: "Expense not found" });
       return;
     }
-    invalidateOrgReportsCache(String(expense.organizationId));
+    await invalidateOrgReportsCache(String(expense.organizationId));
     res.json({ success: true, data: expense, message: "Expense deleted successfully" });
   })
 );

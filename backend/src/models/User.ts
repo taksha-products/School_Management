@@ -18,6 +18,10 @@ export interface IUser extends Document {
   staffPermissions?: StaffPermissions;
   parentStudentIds?: Types.ObjectId[];
   isActive: boolean;
+  twoFactorSecret?: string;
+  twoFactorEnabled: boolean;
+  twoFactorVerifiedAt?: Date;
+  backupCodes?: string[];
 }
 
 const staffPermissionsSchema = new Schema<StaffPermissions>(
@@ -43,7 +47,11 @@ const userSchema = new Schema<IUser>(
     organizationId: { type: Schema.Types.ObjectId, ref: "Organization", default: null },
     staffPermissions: { type: staffPermissionsSchema },
     parentStudentIds: [{ type: Schema.Types.ObjectId, ref: "Student" }],
-    isActive: { type: Boolean, default: true }
+    isActive: { type: Boolean, default: true },
+    twoFactorSecret: { type: String, select: false },
+    twoFactorEnabled: { type: Boolean, default: false },
+    twoFactorVerifiedAt: { type: Date },
+    backupCodes: { type: [String], select: false }
   },
   { timestamps: true }
 );

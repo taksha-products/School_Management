@@ -3,6 +3,7 @@ import type { Request, Response } from "express";
 import { Types } from "mongoose";
 
 import { auth, type AuthenticatedRequest } from "../middleware/auth";
+import { requireFeature } from "../middleware/featureFlag";
 import { orgScope } from "../middleware/orgScope";
 import { requireOrgScope } from "../middleware/requireOrgScope";
 import { isOrgAdminOrStaff, canAccessOrg } from "../middleware/roleCheck";
@@ -20,6 +21,11 @@ import { asyncHandler } from "../utils/asyncHandler";
 import { generateTemplate, parseExcelBuffer, type TemplateHeader } from "../utils/excelParser";
 import { getScopedOrganizationId, orgFilter } from "../utils/orgFilter";
 import { assignFeeStructureToStudents } from "../utils/schoolFeeLedger";
+import {
+  buildStudentFeeStatusMapsByYear,
+  formatStudentFeeStatusLabel
+} from "../services/schoolFeeService";
+import type { IStudent } from "../models/Student";
 
 const bulkRouter = Router();
 
@@ -28,6 +34,7 @@ const bulkGuard = [
   orgScope,
   requireOrgScope,
   canAccessOrg,
+  requireFeature("bulkOperations"),
   isOrgAdminOrStaff("canManageStudents")
 ] as const;
 
@@ -1002,34 +1009,67 @@ bulkRouter.get(
       activeTransports.map((t) => [String(t.studentId), t])
     );
 
-    const rows = students.map((student) => {
+    const feeStatusByYear = await buildStudentFeeStatusMapsByYear(
+      orgId,
+      students.map((student) => student.academicYear)
+    );
+
+    interface StudentExportRow extends Record<string, unknown> {
+      admissionNo: string;
+      name: string;
+      grade: string;
+      section: string;
+      status: string;
+      academicYear: string;
+      parentName: string;
+      parentPhone: string;
+      address: string;
+      bus: string;
+      pickupStop: string;
+      monthlyBusFee: number | string;
+      feeStatus: string;
+      outstandingAmount: number;
+    }
+
+    const rows: StudentExportRow[] = students.map((student: IStudent) => {
       const transport = transportByStudent.get(String(student._id));
       const bus = transport?.busId as { busNumber?: string } | undefined;
+      const yearStatusMap = feeStatusByYear.get(student.academicYear) ?? {};
+      const feeLabels = formatStudentFeeStatusLabel(yearStatusMap[String(student._id)]);
+
       return {
+        admissionNo: student.admissionNo ?? "",
         name: student.name,
         grade: student.grade,
-        bus: bus?.busNumber ?? "",
-        pickupStop: transport?.pickupStop ?? "",
-        monthlyBusFee: transport?.monthlyTransportFee ?? "",
+        section: student.section ?? "",
+        status: student.status,
+        academicYear: student.academicYear,
         parentName: student.parentName,
         parentPhone: student.parentPhone,
         address: student.address ?? "",
-        status: student.status,
-        academicYear: student.academicYear
+        bus: bus?.busNumber ?? "",
+        pickupStop: transport?.pickupStop ?? "",
+        monthlyBusFee: transport?.monthlyTransportFee ?? "",
+        feeStatus: feeLabels.feeStatus,
+        outstandingAmount: feeLabels.outstandingAmount
       };
     });
 
     const headers: TemplateHeader[] = [
+      { key: "admissionNo", header: "Admission No", example: "" },
       { key: "name", header: "Name", example: "" },
       { key: "grade", header: "Grade", example: "" },
-      { key: "bus", header: "Bus", example: "" },
-      { key: "pickupStop", header: "Pickup Stop", example: "" },
+      { key: "section", header: "Section", example: "" },
+      { key: "status", header: "Status", example: "" },
+      { key: "academicYear", header: "Academic Year", example: "" },
       { key: "parentName", header: "Parent Name", example: "" },
       { key: "parentPhone", header: "Parent Phone", example: "" },
       { key: "address", header: "Address", example: "" },
+      { key: "bus", header: "Bus", example: "" },
+      { key: "pickupStop", header: "Pickup Stop", example: "" },
       { key: "monthlyBusFee", header: "Monthly Bus Fee", example: "" },
-      { key: "status", header: "Status", example: "" },
-      { key: "academicYear", header: "Academic Year", example: "" }
+      { key: "feeStatus", header: "Fee Status", example: "" },
+      { key: "outstandingAmount", header: "Outstanding Amount", example: "" }
     ];
     const file = generateTemplate(headers, "Students", rows, await getOrgName(orgId));
 

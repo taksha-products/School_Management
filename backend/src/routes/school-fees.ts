@@ -2,6 +2,7 @@ import { Router } from "express";
 import { Types } from "mongoose";
 
 import { auth, type AuthenticatedRequest } from "../middleware/auth";
+import { requireFeature } from "../middleware/featureFlag";
 import { orgScope } from "../middleware/orgScope";
 import { requireOrgScope } from "../middleware/requireOrgScope";
 import { canAccessOrg, isSuperAdminOrOrgStaff } from "../middleware/roleCheck";
@@ -11,27 +12,46 @@ import { Student } from "../models/Student";
 import {
   buildOrgFeeSummary,
   buildReceiptView,
-  buildStudentFeeLedgerView
+  buildStudentFeeLedgerView,
+  buildStudentFeeStatusMap
 } from "../services/schoolFeeService";
+import {
+  applySchoolPaymentLinesToLedger,
+  buildSchoolPaymentLines,
+  createSchoolPaymentIntent,
+  parseSchoolPaymentLines,
+  type SchoolPaymentLineBody
+} from "../services/schoolFeeCollection";
+import {
+  executeAssignFeeStructure,
+  previewAssignFeeStructure,
+  type AssignFeeStructureRequest
+} from "../services/schoolFeeAssignmentService";
 import { asyncHandler } from "../utils/asyncHandler";
 import { validate } from "../middleware/validate";
 import {
-  cacheGet,
-  cacheSet,
-  invalidateOrgSchoolFeesCache
+  getCached,
+  invalidateOrgSchoolFeesCache,
+  orgCacheKey,
+  setCached
 } from "../utils/cache";
 import { getScopedOrganizationId, orgFilter } from "../utils/orgFilter";
 import { paginate, paginateArray, parsePaginationQuery } from "../utils/paginate";
 import { collectSchoolFeesValidation } from "../validators/schoolFees";
 import {
-  computeLedgerStatus,
   generateReceiptNumber,
   refreshOverdueStatuses
 } from "../utils/schoolFeeLedger";
 
 const schoolFeesRouter = Router();
 
-const scopeMiddleware = [auth, orgScope, requireOrgScope, canAccessOrg] as const;
+const scopeMiddleware = [
+  auth,
+  orgScope,
+  requireOrgScope,
+  canAccessOrg,
+  requireFeature("schoolFees")
+] as const;
 
 const allowCollect = (
   req: import("express").Request,
@@ -45,6 +65,130 @@ const allowCollect = (
   }
   isSuperAdminOrOrgStaff("canCollectFees")(req, res, next);
 };
+
+const allowManageStudents = (
+  req: import("express").Request,
+  res: import("express").Response,
+  next: import("express").NextFunction
+): void => {
+  const authReq = req as AuthenticatedRequest;
+  if (authReq.user?.role === "superAdmin" || authReq.user?.role === "orgAdmin") {
+    next();
+    return;
+  }
+  isSuperAdminOrOrgStaff("canManageStudents")(req, res, next);
+};
+
+schoolFeesRouter.post(
+  "/assign/preview",
+  ...scopeMiddleware,
+  allowManageStudents,
+  asyncHandler(async (req, res) => {
+    const authReq = req as AuthenticatedRequest;
+    const orgId = getScopedOrganizationId(authReq, res)!;
+    const outcome = await previewAssignFeeStructure(
+      orgId,
+      req.body as AssignFeeStructureRequest
+    );
+
+    if (!outcome.ok) {
+      res.status(outcome.status).json({
+        success: false,
+        data: null,
+        message: outcome.message
+      });
+      return;
+    }
+
+    res.json({
+      success: true,
+      data: outcome.preview,
+      message: "Fee assignment preview generated successfully"
+    });
+  })
+);
+
+schoolFeesRouter.post(
+  "/assign",
+  ...scopeMiddleware,
+  allowManageStudents,
+  asyncHandler(async (req, res) => {
+    const authReq = req as AuthenticatedRequest;
+    const orgId = getScopedOrganizationId(authReq, res)!;
+    const outcome = await executeAssignFeeStructure(orgId, req.body as AssignFeeStructureRequest);
+
+    if (!outcome.ok) {
+      res.status(outcome.status).json({
+        success: false,
+        data: null,
+        message: outcome.message
+      });
+      return;
+    }
+
+    await invalidateOrgSchoolFeesCache(orgId);
+
+    res.json({
+      success: true,
+      data: outcome.result,
+      message: `Fees assigned to ${outcome.result.assigned} student(s) successfully`
+    });
+  })
+);
+
+schoolFeesRouter.post(
+  "/payment-intent",
+  ...scopeMiddleware,
+  allowCollect,
+  asyncHandler(async (req, res) => {
+    const authReq = req as AuthenticatedRequest;
+    const orgId = getScopedOrganizationId(authReq, res)!;
+    const { studentId, academicYear, payments, notes } = req.body as {
+      studentId?: string;
+      academicYear?: string;
+      payments?: SchoolPaymentLineBody[];
+      notes?: string;
+    };
+
+    if (!studentId || !academicYear || !Array.isArray(payments) || payments.length === 0) {
+      res.status(400).json({
+        success: false,
+        data: null,
+        message: "studentId, academicYear, and payments[] are required"
+      });
+      return;
+    }
+
+    const student = await Student.findOne({ _id: studentId, ...orgFilter(authReq, res) });
+    if (!student) {
+      res.status(404).json({ success: false, data: null, message: "Student not found" });
+      return;
+    }
+
+    try {
+      const intent = await createSchoolPaymentIntent({
+        organizationId: orgId,
+        studentId,
+        academicYear,
+        payments,
+        createdBy: authReq.user!.userId,
+        notes
+      });
+
+      res.status(201).json({
+        success: true,
+        data: intent,
+        message: "Payment intent created"
+      });
+    } catch (error) {
+      res.status(400).json({
+        success: false,
+        data: null,
+        message: error instanceof Error ? error.message : "Invalid payment request"
+      });
+    }
+  })
+);
 
 schoolFeesRouter.get(
   "/ledger",
@@ -77,6 +221,34 @@ schoolFeesRouter.get(
       success: true,
       data,
       message: "Fee ledger fetched successfully"
+    });
+  })
+);
+
+schoolFeesRouter.get(
+  "/student-fee-status",
+  ...scopeMiddleware,
+  allowCollect,
+  asyncHandler(async (req, res) => {
+    const authReq = req as AuthenticatedRequest;
+    const orgId = getScopedOrganizationId(authReq, res)!;
+    const { academicYear } = req.query as { academicYear?: string };
+
+    if (!academicYear) {
+      res.status(400).json({
+        success: false,
+        data: null,
+        message: "academicYear is required"
+      });
+      return;
+    }
+
+    const statusMap = await buildStudentFeeStatusMap(orgId, academicYear);
+
+    res.json({
+      success: true,
+      data: statusMap,
+      message: "Student fee status fetched successfully"
     });
   })
 );
@@ -203,12 +375,7 @@ schoolFeesRouter.post(
       academicYear?: string;
       paymentMode?: "cash" | "upi" | "cheque" | "online";
       upiTransactionId?: string;
-      payments?: Array<{
-        feeHeadName: string;
-        periodLabel: string;
-        amountPaid: number;
-        lateFee?: number;
-      }>;
+      payments?: SchoolPaymentLineBody[];
       notes?: string;
     };
 
@@ -242,68 +409,19 @@ schoolFeesRouter.post(
       return;
     }
 
-    const feeHeadPayments: Array<{
-      feeHeadName: string;
-      periodLabel: string;
-      amountDue: number;
-      amountPaid: number;
-      lateFee: number;
-      status: "paid" | "partial";
-    }> = [];
+    let built;
+    let normalizedPayments;
 
-    let totalAmountDue = 0;
-    let totalAmountPaid = 0;
-    let totalLateFee = 0;
-    const updatedLedgerIds: Types.ObjectId[] = [];
-
-    for (const item of payments) {
-      const ledger = await FeeLedger.findOne({
-        organizationId: new Types.ObjectId(orgId),
-        studentId: new Types.ObjectId(studentId),
-        academicYear,
-        feeHeadName: item.feeHeadName,
-        periodLabel: item.periodLabel
+    try {
+      normalizedPayments = parseSchoolPaymentLines(payments);
+      built = await buildSchoolPaymentLines(orgId, studentId, academicYear, normalizedPayments);
+    } catch (error) {
+      res.status(400).json({
+        success: false,
+        data: null,
+        message: error instanceof Error ? error.message : "Invalid payment request"
       });
-
-      if (!ledger) {
-        res.status(400).json({
-          success: false,
-          data: null,
-          message: `No ledger entry for ${item.feeHeadName} / ${item.periodLabel}`
-        });
-        return;
-      }
-
-      const payAmount = item.amountPaid ?? 0;
-      const lateFeeAdd = item.lateFee ?? 0;
-      const newPaid = ledger.amountPaid + payAmount;
-      const newLateFee = ledger.lateFee + lateFeeAdd;
-      const lineStatus: "paid" | "partial" =
-        newPaid >= ledger.amountDue + newLateFee ? "paid" : "partial";
-
-      ledger.amountPaid = newPaid;
-      ledger.lateFee = newLateFee;
-      ledger.status = computeLedgerStatus(
-        ledger.amountDue,
-        newPaid,
-        ledger.dueDate,
-        newLateFee
-      );
-      await ledger.save();
-      updatedLedgerIds.push(ledger._id);
-
-      feeHeadPayments.push({
-        feeHeadName: item.feeHeadName,
-        periodLabel: item.periodLabel,
-        amountDue: ledger.amountDue,
-        amountPaid: payAmount,
-        lateFee: lateFeeAdd,
-        status: lineStatus
-      });
-
-      totalAmountDue += ledger.amountDue;
-      totalAmountPaid += payAmount;
-      totalLateFee += lateFeeAdd;
+      return;
     }
 
     let receiptNumber = generateReceiptNumber();
@@ -322,23 +440,26 @@ schoolFeesRouter.post(
       paymentMode,
       upiTransactionId,
       collectedBy: authReq.user!.userId,
-      feeHeadPayments,
-      totalAmountDue,
-      totalAmountPaid,
-      totalLateFee,
+      feeHeadPayments: built.feeHeadPayments,
+      totalAmountDue: built.totalAmountDue,
+      totalAmountPaid: built.totalAmountPaid,
+      totalLateFee: 0,
       notes
     });
 
-    await FeeLedger.updateMany(
-      { _id: { $in: updatedLedgerIds } },
-      { $set: { paymentId: payment._id } }
+    await applySchoolPaymentLinesToLedger(
+      orgId,
+      studentId,
+      academicYear,
+      normalizedPayments,
+      payment._id
     );
 
     const fullPayment = await SchoolFeePayment.findById(payment._id)
       .populate("studentId", "name grade")
       .populate("collectedBy", "name");
 
-    invalidateOrgSchoolFeesCache(orgId);
+    await invalidateOrgSchoolFeesCache(orgId);
     res.status(201).json({
       success: true,
       data: fullPayment,
@@ -424,8 +545,8 @@ schoolFeesRouter.get(
 
     const orgId = getScopedOrganizationId(authReq, res)!;
     const monthKey = month ?? "all";
-    const cacheKey = `${orgId}:school-fees:summary:${monthKey}:${academicYear}`;
-    const cached = cacheGet<Awaited<ReturnType<typeof buildOrgFeeSummary>>>(cacheKey);
+    const cacheKey = orgCacheKey(orgId, `school-fees:summary:${monthKey}:${academicYear}`);
+    const cached = await getCached<Awaited<ReturnType<typeof buildOrgFeeSummary>>>(cacheKey);
     if (cached) {
       res.json({
         success: true,
@@ -436,7 +557,7 @@ schoolFeesRouter.get(
     }
 
     const data = await buildOrgFeeSummary(orgId, academicYear, month);
-    cacheSet(cacheKey, data, 300);
+    await setCached(cacheKey, data, 300);
 
     res.json({
       success: true,

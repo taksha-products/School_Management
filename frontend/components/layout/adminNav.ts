@@ -3,6 +3,7 @@ export type AdminNavIcon =
   | "Users"
   | "Coins"
   | "Bus"
+  | "MapPin"
   | "ChartBar"
   | "Tools"
   | "Settings";
@@ -17,6 +18,7 @@ export interface AdminNavItem {
   href: string;
   icon: AdminNavIcon;
   badge?: "outstanding";
+  featureFlag?: string;
   children?: AdminNavChild[];
 }
 
@@ -53,6 +55,12 @@ export const adminNav: AdminNavItem[] = [
     ]
   },
   {
+    label: "Live Tracking",
+    href: "/admin/gps/live",
+    icon: "MapPin",
+    featureFlag: "gpsTracking"
+  },
+  {
     label: "Reports",
     href: "/admin/reports",
     icon: "ChartBar"
@@ -64,6 +72,7 @@ export const adminNav: AdminNavItem[] = [
     children: [
       { label: "Upload students", href: "/admin/bulk/upload-students" },
       { label: "Assign transport", href: "/admin/bulk/assign-buses" },
+      { label: "Assign fee structure", href: "/admin/bulk/assign-fees" },
       { label: "Bulk fee collection", href: "/admin/bulk/fee-collection" },
       { label: "Grade promotion", href: "/admin/bulk/grade-promotion" },
       { label: "Export data", href: "/admin/bulk/export" }
@@ -76,7 +85,8 @@ export const adminNav: AdminNavItem[] = [
     children: [
       { label: "Staff accounts", href: "/admin/settings/staff" },
       { label: "Parent accounts", href: "/admin/settings/parents" },
-      { label: "Organization", href: "/admin/settings/organization" }
+      { label: "Organization", href: "/admin/settings/organization" },
+      { label: "Security", href: "/admin/settings/security" }
     ]
   }
 ];

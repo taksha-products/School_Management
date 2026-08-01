@@ -11,6 +11,10 @@ import {
   buildReceiptView,
   buildStudentFeeLedgerView
 } from "../services/schoolFeeService";
+import {
+  createSchoolPaymentIntent,
+  type SchoolPaymentLineBody
+} from "../services/schoolFeeCollection";
 import { asyncHandler } from "../utils/asyncHandler";
 import { getScopedOrganizationId, orgFilter } from "../utils/orgFilter";
 
@@ -114,6 +118,63 @@ parentRouter.get(
       data,
       message: "Child fee ledger fetched successfully"
     });
+  })
+);
+
+parentRouter.post(
+  "/children/:studentId/payment-intent",
+  ...guard,
+  asyncHandler(async (req, res) => {
+    const authReq = req as AuthenticatedRequest;
+    const studentId = String(req.params.studentId);
+    const { academicYear, payments, notes } = req.body as {
+      academicYear?: string;
+      payments?: SchoolPaymentLineBody[];
+      notes?: string;
+    };
+
+    if (!assertParentChild(authReq, studentId)) {
+      res.status(403).json({
+        success: false,
+        data: null,
+        message: "Forbidden: not your child"
+      });
+      return;
+    }
+
+    if (!academicYear || !Array.isArray(payments) || payments.length === 0) {
+      res.status(400).json({
+        success: false,
+        data: null,
+        message: "academicYear and payments[] are required"
+      });
+      return;
+    }
+
+    const orgId = getScopedOrganizationId(authReq, res)!;
+
+    try {
+      const intent = await createSchoolPaymentIntent({
+        organizationId: orgId,
+        studentId,
+        academicYear,
+        payments,
+        createdBy: authReq.user!.userId,
+        notes
+      });
+
+      res.status(201).json({
+        success: true,
+        data: intent,
+        message: "Payment intent created"
+      });
+    } catch (error) {
+      res.status(400).json({
+        success: false,
+        data: null,
+        message: error instanceof Error ? error.message : "Invalid payment request"
+      });
+    }
   })
 );
 

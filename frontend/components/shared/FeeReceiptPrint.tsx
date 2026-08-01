@@ -89,11 +89,6 @@ export const FeeReceiptPrint = ({
                 <td className="py-2 text-gray-700">{line.periodLabel}</td>
                 <td className="py-2 text-right font-medium text-gray-900">
                   {formatINR(line.amountPaid)}
-                  {line.lateFee > 0 && (
-                    <span className="block text-xs text-red-500">
-                      +{formatINR(line.lateFee)} late fee
-                    </span>
-                  )}
                 </td>
               </tr>
             ))}

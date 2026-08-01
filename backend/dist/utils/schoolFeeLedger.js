@@ -143,23 +143,57 @@ const refreshOverdueStatuses = async (filter) => {
     }, { $set: { status: "overdue" } });
 };
 exports.refreshOverdueStatuses = refreshOverdueStatuses;
-const generateLedgerForAssignment = async (organizationId, studentId, feeStructure, academicYear, concessions) => {
-    let created = 0;
-    for (const feeHead of feeStructure.feeHeads) {
+const ledgerEntryKey = (studentId, feeHeadName, periodLabel) => `${studentId.toString()}|${feeHeadName}|${periodLabel}`;
+const LEDGER_INSERT_BATCH_SIZE = 500;
+const countBulkInsertResults = (error, chunkSize) => {
+    if (error &&
+        typeof error === "object" &&
+        "name" in error &&
+        error.name === "MongoBulkWriteError" &&
+        "result" in error &&
+        error.result &&
+        typeof error.result === "object" &&
+        "nInserted" in error.result &&
+        typeof error.result.nInserted === "number") {
+        return error.result.nInserted;
+    }
+    if (error &&
+        typeof error === "object" &&
+        "code" in error &&
+        error.code === 11000) {
+        return 0;
+    }
+    throw error;
+};
+const insertLedgerEntries = async (entries) => {
+    if (entries.length === 0) {
+        return 0;
+    }
+    let inserted = 0;
+    for (let index = 0; index < entries.length; index += LEDGER_INSERT_BATCH_SIZE) {
+        const chunk = entries.slice(index, index + LEDGER_INSERT_BATCH_SIZE);
+        try {
+            const created = await FeeLedger_1.FeeLedger.insertMany(chunk, { ordered: false });
+            inserted += created.length;
+        }
+        catch (error) {
+            inserted += countBulkInsertResults(error, chunk.length);
+        }
+    }
+    return inserted;
+};
+const buildLedgerEntriesForStudent = (organizationId, studentId, feeStructure, academicYear, concessions, existingKeys) => {
+    const entries = [];
+    for (const feeHead of feeStructure.feeHeads ?? []) {
         const periods = (0, exports.generatePeriodsForFeeHead)(feeHead, academicYear);
         const amountDue = (0, exports.applyConcession)(feeHead.amount, feeHead.name, concessions);
         for (const period of periods) {
-            const existing = await FeeLedger_1.FeeLedger.findOne({
-                studentId,
-                feeHeadName: feeHead.name,
-                periodLabel: period.periodLabel,
-                academicYear
-            });
-            if (existing) {
+            const key = ledgerEntryKey(studentId, feeHead.name, period.periodLabel);
+            if (existingKeys.has(key)) {
                 continue;
             }
-            const status = (0, exports.computeLedgerStatus)(0, 0, period.dueDate);
-            await FeeLedger_1.FeeLedger.create({
+            const status = (0, exports.computeLedgerStatus)(amountDue, 0, period.dueDate);
+            entries.push({
                 organizationId,
                 studentId,
                 feeStructureId: feeStructure._id,
@@ -172,39 +206,75 @@ const generateLedgerForAssignment = async (organizationId, studentId, feeStructu
                 dueDate: period.dueDate,
                 academicYear
             });
-            created += 1;
+            existingKeys.add(key);
         }
     }
-    return created;
+    return entries;
+};
+const generateLedgerForAssignment = async (organizationId, studentId, feeStructure, academicYear, concessions = []) => {
+    const existingLedgers = await FeeLedger_1.FeeLedger.find({
+        organizationId,
+        studentId
+    })
+        .select("feeHeadName periodLabel")
+        .lean();
+    const existingKeys = new Set(existingLedgers.map((row) => ledgerEntryKey(studentId, row.feeHeadName, row.periodLabel)));
+    const entries = buildLedgerEntriesForStudent(organizationId, studentId, feeStructure, academicYear, concessions, existingKeys);
+    return insertLedgerEntries(entries);
 };
 exports.generateLedgerForAssignment = generateLedgerForAssignment;
 const assignFeeStructureToStudents = async (organizationId, feeStructure, studentIds, academicYear) => {
-    const skipped = [];
-    let assignments = 0;
-    let ledgerEntries = 0;
-    for (const studentId of studentIds) {
-        const assignment = await StudentFeeAssignment_1.StudentFeeAssignment.findOneAndUpdate({
-            organizationId,
-            studentId,
-            academicYear
-        }, {
-            $set: {
-                organizationId,
-                studentId,
-                feeStructureId: feeStructure._id,
-                academicYear,
-                isActive: true
+    if (studentIds.length === 0) {
+        return { assignments: 0, ledgerEntries: 0, skipped: [] };
+    }
+    await StudentFeeAssignment_1.StudentFeeAssignment.bulkWrite(studentIds.map((studentId) => ({
+        updateOne: {
+            filter: { organizationId, studentId, academicYear },
+            update: {
+                $set: {
+                    organizationId,
+                    studentId,
+                    feeStructureId: feeStructure._id,
+                    academicYear,
+                    isActive: true
+                },
+                $setOnInsert: { concessions: [] }
             },
-            $setOnInsert: { concessions: [] }
-        }, { upsert: true, new: true });
-        assignments += 1;
-        const created = await (0, exports.generateLedgerForAssignment)(organizationId, studentId, feeStructure, academicYear, assignment.concessions);
-        ledgerEntries += created;
-        if (created === 0) {
+            upsert: true
+        }
+    })));
+    const assignments = await StudentFeeAssignment_1.StudentFeeAssignment.find({
+        organizationId,
+        studentId: { $in: studentIds },
+        academicYear
+    }).lean();
+    const concessionsByStudent = new Map(assignments.map((assignment) => [
+        assignment.studentId.toString(),
+        assignment.concessions ?? []
+    ]));
+    const existingLedgers = await FeeLedger_1.FeeLedger.find({
+        organizationId,
+        studentId: { $in: studentIds }
+    })
+        .select("studentId feeHeadName periodLabel")
+        .lean();
+    const existingKeys = new Set(existingLedgers.map((row) => ledgerEntryKey(row.studentId, row.feeHeadName, row.periodLabel)));
+    const toInsert = [];
+    const skipped = [];
+    for (const studentId of studentIds) {
+        const concessions = concessionsByStudent.get(studentId.toString()) ?? [];
+        const beforeCount = toInsert.length;
+        toInsert.push(...buildLedgerEntriesForStudent(organizationId, studentId, feeStructure, academicYear, concessions, existingKeys));
+        if (toInsert.length === beforeCount) {
             skipped.push(studentId.toString());
         }
     }
-    return { assignments, ledgerEntries, skipped };
+    const ledgerEntries = await insertLedgerEntries(toInsert);
+    return {
+        assignments: studentIds.length,
+        ledgerEntries,
+        skipped
+    };
 };
 exports.assignFeeStructureToStudents = assignFeeStructureToStudents;
 const periodMatchesMonth = (periodLabel, monthKey) => {

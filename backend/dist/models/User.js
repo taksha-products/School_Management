@@ -20,7 +20,11 @@ const userSchema = new mongoose_1.Schema({
     organizationId: { type: mongoose_1.Schema.Types.ObjectId, ref: "Organization", default: null },
     staffPermissions: { type: staffPermissionsSchema },
     parentStudentIds: [{ type: mongoose_1.Schema.Types.ObjectId, ref: "Student" }],
-    isActive: { type: Boolean, default: true }
+    isActive: { type: Boolean, default: true },
+    twoFactorSecret: { type: String, select: false },
+    twoFactorEnabled: { type: Boolean, default: false },
+    twoFactorVerifiedAt: { type: Date },
+    backupCodes: { type: [String], select: false }
 }, { timestamps: true });
 userSchema.index({ email: 1 }, { unique: true });
 userSchema.index({ organizationId: 1, role: 1 });

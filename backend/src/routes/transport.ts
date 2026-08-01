@@ -208,7 +208,7 @@ transportRouter.post(
       addedBy: authReq.user?.userId ? new Types.ObjectId(authReq.user.userId) : undefined
     });
 
-    invalidateOrgReportsCache(orgId);
+    await invalidateOrgReportsCache(orgId);
     res.status(201).json({
       success: true,
       data: record,
@@ -284,7 +284,7 @@ transportRouter.put(
       await record.save();
     }
 
-    invalidateOrgReportsCache(String(orgId));
+    await invalidateOrgReportsCache(String(orgId));
     res.json({ success: true, data: record, message: "Transport record updated" });
   })
 );
@@ -313,7 +313,7 @@ transportRouter.put(
       record.dropStop = reason;
     }
 
-    invalidateOrgReportsCache(String(record.organizationId));
+    await invalidateOrgReportsCache(String(record.organizationId));
     res.json({ success: true, data: record, message: "Transport deactivated" });
   })
 );

@@ -17,12 +17,21 @@ orgOrganizationRouter.get(
   asyncHandler(async (req, res) => {
     const authReq = req as AuthenticatedRequest;
     const orgId = getScopedOrganizationId(authReq, res)!;
-    const org = await Organization.findById(orgId);
+    const org = await Organization.findById(orgId).select(
+      "name code address phone email logo plan isActive currentAcademicYear features featureOverrides"
+    );
     if (!org) {
       res.status(404).json({ success: false, data: null, message: "Organization not found" });
       return;
     }
-    res.json({ success: true, data: org, message: "Organization fetched successfully" });
+    res.json({
+      success: true,
+      data: {
+        ...org.toObject({ virtuals: true }),
+        enabledFeatures: org.enabledFeatures
+      },
+      message: "Organization fetched successfully"
+    });
   })
 );
 

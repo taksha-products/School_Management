@@ -7,20 +7,20 @@ import type { JSX, ReactNode } from "react";
 import { Header } from "@/components/layout/Header";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { getStaffNavItems } from "@/components/layout/staffNav";
-import { getToken, getUser } from "@/lib/auth";
+import { bootstrapSession } from "@/lib/auth";
 
 const StaffLayout = ({ children }: { children: ReactNode }): JSX.Element => {
   const router = useRouter();
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const token = getToken();
-    const user = getUser();
-    if (!token || user?.role !== "staff") {
-      router.replace("/login");
-      return;
-    }
-    setReady(true);
+    void bootstrapSession().then((user) => {
+      if (!user || user.role !== "staff") {
+        router.replace("/login");
+        return;
+      }
+      setReady(true);
+    });
   }, [router]);
 
   if (!ready) {

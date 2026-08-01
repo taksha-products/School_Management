@@ -27,7 +27,7 @@ busesRouter.get("/", ...scopeMiddleware, (req, res, next) => {
         { $match: { organizationId: orgId } },
         {
             $lookup: {
-                from: "students",
+                from: "studenttransports",
                 let: { busId: "$_id", orgId: "$organizationId" },
                 pipeline: [
                     {

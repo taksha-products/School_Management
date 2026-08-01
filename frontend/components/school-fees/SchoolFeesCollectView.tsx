@@ -1,10 +1,11 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
+import { PaymentModeModal } from "@/components/payments/PaymentModeModal";
 import { StudentSearch } from "@/components/shared/StudentSearch";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -12,9 +13,10 @@ import { Card } from "@/components/ui/Card";
 import { useToast } from "@/components/ui/Toast";
 import { ACADEMIC_YEAR } from "@/lib/constants";
 import { api } from "@/lib/api";
+import { createSchoolPaymentIntent } from "@/lib/payments";
 import { formatINR } from "@/lib/utils";
 import type { Student } from "@/types";
-import type { LedgerPeriod, SchoolPaymentMode, StudentFeeLedgerView } from "@/types/schoolFees";
+import type { LedgerPeriod, StudentFeeLedgerView } from "@/types/schoolFees";
 
 type SelectedLine = {
   feeHeadName: string;
@@ -22,12 +24,24 @@ type SelectedLine = {
   amountDue: number;
   balance: number;
   amountPaid: number;
-  lateFee: number;
+};
+
+type PaymentLineInput = {
+  feeHeadName: string;
+  periodLabel: string;
+  amountPaid: number;
 };
 
 interface SchoolFeesCollectViewProps {
   receiptBasePath: string;
   historyPath?: (studentId: string) => string;
+}
+
+interface PaymentModalState {
+  feePaymentId: string;
+  amount: number;
+  description: string;
+  studentName: string;
 }
 
 export const SchoolFeesCollectView = ({
@@ -40,10 +54,10 @@ export const SchoolFeesCollectView = ({
   const [student, setStudent] = useState<Student | null>(null);
   const [academicYear, setAcademicYear] = useState(ACADEMIC_YEAR);
   const [selected, setSelected] = useState<Record<string, SelectedLine>>({});
-  const [paymentMode, setPaymentMode] = useState<SchoolPaymentMode>("cash");
-  const [upiTransactionId, setUpiTransactionId] = useState("");
-  const [notes, setNotes] = useState("");
   const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [paymentModal, setPaymentModal] = useState<PaymentModalState | null>(null);
+  const [collectingKey, setCollectingKey] = useState<string | null>(null);
+  const [collectingSummary, setCollectingSummary] = useState(false);
 
   const preselectId = searchParams.get("studentId");
 
@@ -81,36 +95,70 @@ export const SchoolFeesCollectView = ({
   }, [ledgerQuery.data]);
 
   const selectedList = Object.values(selected);
-  const totalPay = selectedList.reduce((s, l) => s + l.amountPaid + l.lateFee, 0);
+  const totalPay = selectedList.reduce((sum, line) => sum + line.amountPaid, 0);
 
-  const collectMutation = useMutation({
-    mutationFn: async () => {
-      if (!student) return;
-      return api.post("/api/school-fees/collect", {
-        studentId: student._id,
-        academicYear,
-        paymentMode,
-        upiTransactionId: paymentMode === "upi" || paymentMode === "online" ? upiTransactionId : undefined,
-        payments: selectedList.map((l) => ({
-          feeHeadName: l.feeHeadName,
-          periodLabel: l.periodLabel,
-          amountPaid: l.amountPaid,
-          lateFee: l.lateFee
-        })),
-        notes
+  const startPaymentCollection = async (
+    payments: PaymentLineInput[],
+    options?: { rowKey?: string; fromSummary?: boolean }
+  ): Promise<void> => {
+    if (!student || payments.length === 0) {
+      return;
+    }
+
+    if (options?.rowKey) {
+      setCollectingKey(options.rowKey);
+    }
+    if (options?.fromSummary) {
+      setCollectingSummary(true);
+    }
+
+    try {
+      const intent = await createSchoolPaymentIntent(student._id, academicYear, payments);
+      setPaymentModal({
+        feePaymentId: intent.feePaymentId,
+        amount: intent.amount,
+        description: intent.description,
+        studentName: student.name
       });
-    },
-    onSuccess: (res) => {
-      const receipt = res?.data?.data?.receiptNumber as string;
-      queryClient.invalidateQueries({ queryKey: ["school-fee-ledger"] });
-      setSelected({});
-      showToast("success", "Payment collected");
-      if (receipt) {
-        window.open(`${receiptBasePath}/${receipt}`, "_blank");
-      }
-    },
-    onError: () => showToast("error", "Failed to collect payment")
-  });
+    } catch {
+      showToast("error", "Could not start payment collection");
+    } finally {
+      setCollectingKey(null);
+      setCollectingSummary(false);
+    }
+  };
+
+  const openPaymentModal = async (row: (typeof flatPeriods)[0]): Promise<void> => {
+    await startPaymentCollection(
+      [
+        {
+          feeHeadName: row.feeHeadName,
+          periodLabel: row.periodLabel,
+          amountPaid: row.balance
+        }
+      ],
+      { rowKey: row.key }
+    );
+  };
+
+  const openSummaryPaymentModal = async (): Promise<void> => {
+    await startPaymentCollection(
+      selectedList.map((line) => ({
+        feeHeadName: line.feeHeadName,
+        periodLabel: line.periodLabel,
+        amountPaid: line.amountPaid
+      })),
+      { fromSummary: true }
+    );
+  };
+
+  const handlePaymentSuccess = (receiptNumber: string): void => {
+    queryClient.invalidateQueries({ queryKey: ["school-fee-ledger"] });
+    setSelected({});
+    showToast("success", `Payment recorded — ${receiptNumber}`);
+    setPaymentModal(null);
+    window.open(`${receiptBasePath}/${receiptNumber}`, "_blank");
+  };
 
   const toggleRow = (row: (typeof flatPeriods)[0], checked: boolean) => {
     if (!checked) {
@@ -121,8 +169,6 @@ export const SchoolFeesCollectView = ({
       });
       return;
     }
-    const late =
-      row.status === "overdue" ? Math.round(row.balance * 0.02) : 0;
     setSelected((prev) => ({
       ...prev,
       [row.key]: {
@@ -130,11 +176,13 @@ export const SchoolFeesCollectView = ({
         periodLabel: row.periodLabel,
         amountDue: row.amountDue,
         balance: row.balance,
-        amountPaid: row.balance,
-        lateFee: late
+        amountPaid: row.balance
       }
     }));
   };
+
+  const canCollectRow = (status: string): boolean =>
+    status === "pending" || status === "partial" || status === "overdue";
 
   const ledger = ledgerQuery.data;
   const busLabel =
@@ -204,6 +252,7 @@ export const SchoolFeesCollectView = ({
                       <th>Due Date</th>
                       <th>Balance</th>
                       <th>Status</th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -245,6 +294,17 @@ export const SchoolFeesCollectView = ({
                               {row.status}
                             </Badge>
                           </td>
+                          <td onClick={(e) => e.stopPropagation()}>
+                            {canCollectRow(row.status) && (
+                              <Button
+                                variant="secondary"
+                                disabled={collectingKey === row.key}
+                                onClick={() => openPaymentModal(row)}
+                              >
+                                {collectingKey === row.key ? "..." : "Collect"}
+                              </Button>
+                            )}
+                          </td>
                         </tr>
                       );
                     })}
@@ -255,42 +315,23 @@ export const SchoolFeesCollectView = ({
             {editingKey && selected[editingKey] && (
               <div className="mt-3 rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800">
                 <p className="mb-2 font-medium">Adjust payment for selected row</p>
-                <div className="grid gap-2 md:grid-cols-2">
-                  <label>
-                    Amount to pay
-                    <input
-                      type="number"
-                      className="mt-1 w-full rounded border px-2 py-1"
-                      value={selected[editingKey].amountPaid}
-                      onChange={(e) =>
-                        setSelected((prev) => ({
-                          ...prev,
-                          [editingKey]: {
-                            ...prev[editingKey],
-                            amountPaid: Number(e.target.value)
-                          }
-                        }))
-                      }
-                    />
-                  </label>
-                  <label>
-                    Late fee
-                    <input
-                      type="number"
-                      className="mt-1 w-full rounded border px-2 py-1"
-                      value={selected[editingKey].lateFee}
-                      onChange={(e) =>
-                        setSelected((prev) => ({
-                          ...prev,
-                          [editingKey]: {
-                            ...prev[editingKey],
-                            lateFee: Number(e.target.value)
-                          }
-                        }))
-                      }
-                    />
-                  </label>
-                </div>
+                <label>
+                  Amount to pay
+                  <input
+                    type="number"
+                    className="mt-1 w-full rounded border px-2 py-1"
+                    value={selected[editingKey].amountPaid}
+                    onChange={(e) =>
+                      setSelected((prev) => ({
+                        ...prev,
+                        [editingKey]: {
+                          ...prev[editingKey],
+                          amountPaid: Number(e.target.value)
+                        }
+                      }))
+                    }
+                  />
+                </label>
               </div>
             )}
           </Card>
@@ -306,53 +347,36 @@ export const SchoolFeesCollectView = ({
                     <span>
                       {line.feeHeadName} ({line.periodLabel})
                     </span>
-                    <span>{formatINR(line.amountPaid + line.lateFee)}</span>
+                    <span>{formatINR(line.amountPaid)}</span>
                   </li>
                 ))}
               </ul>
             )}
-            <label className="mb-2 block text-sm">
-              Payment mode
-              <select
-                className="mt-1 w-full rounded border px-2 py-2"
-                value={paymentMode}
-                onChange={(e) => setPaymentMode(e.target.value as SchoolPaymentMode)}
-              >
-                <option value="cash">Cash</option>
-                <option value="upi">UPI</option>
-                <option value="cheque">Cheque</option>
-                <option value="online">Online</option>
-              </select>
-            </label>
-            {(paymentMode === "upi" || paymentMode === "online") && (
-              <label className="mb-2 block text-sm">
-                UPI / Transaction ID
-                <input
-                  className="mt-1 w-full rounded border px-2 py-2"
-                  value={upiTransactionId}
-                  onChange={(e) => setUpiTransactionId(e.target.value)}
-                />
-              </label>
-            )}
-            <label className="mb-3 block text-sm">
-              Notes
-              <textarea
-                className="mt-1 w-full rounded border px-2 py-2"
-                rows={2}
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-              />
-            </label>
             <p className="mb-3 text-lg font-bold">Total: {formatINR(totalPay)}</p>
             <Button
               className="w-full"
-              disabled={selectedList.length === 0 || collectMutation.isPending}
-              onClick={() => collectMutation.mutate()}
+              disabled={selectedList.length === 0 || collectingSummary}
+              onClick={() => void openSummaryPaymentModal()}
             >
-              {collectMutation.isPending ? "Processing..." : "Collect & Print Receipt"}
+              {collectingSummary ? "Starting..." : "Collect Payment"}
             </Button>
           </Card>
         </div>
+      )}
+
+      {student && paymentModal && (
+        <PaymentModeModal
+          isOpen={!!paymentModal}
+          onClose={() => setPaymentModal(null)}
+          studentName={paymentModal.studentName}
+          studentId={student._id}
+          feePaymentId={paymentModal.feePaymentId}
+          feeType="school"
+          amount={paymentModal.amount}
+          description={paymentModal.description}
+          onSuccess={handlePaymentSuccess}
+          schoolReceiptPath={receiptBasePath}
+        />
       )}
     </div>
   );

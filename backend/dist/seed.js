@@ -16,8 +16,13 @@ const Organization_1 = require("./models/Organization");
 const SchoolFeePayment_1 = require("./models/SchoolFeePayment");
 const Student_1 = require("./models/Student");
 const StudentFeeAssignment_1 = require("./models/StudentFeeAssignment");
+const StudentTransport_1 = require("./models/StudentTransport");
 const User_1 = require("./models/User");
 const schoolFeeLedger_1 = require("./utils/schoolFeeLedger");
+const totp_1 = require("./utils/totp");
+const ACADEMIC_YEAR = "2025-26";
+/** Base32 secret used for seeded super-admin 2FA in development/E2E. */
+const SEED_SUPER_ADMIN_TOTP_SECRET = "JBSWY3DPEHPK3PXP";
 const seed = async () => {
     await (0, db_1.connectDB)();
     console.log("Connected to MongoDB");
@@ -27,6 +32,7 @@ const seed = async () => {
         Organization_1.Organization.deleteMany({}),
         Bus_1.Bus.deleteMany({}),
         Student_1.Student.deleteMany({}),
+        StudentTransport_1.StudentTransport.deleteMany({}),
         FeePayment_1.FeePayment.deleteMany({}),
         FeeGroup_1.FeeGroup.deleteMany({}),
         Expense_1.Expense.deleteMany({}),
@@ -41,11 +47,13 @@ const seed = async () => {
         name: "Demo School",
         code: "demo-school",
         plan: "trial",
-        isActive: true
+        isActive: true,
+        currentAcademicYear: ACADEMIC_YEAR
     });
     console.log(`Organization created: ${demoSchool.name}`);
     const orgId = demoSchool._id;
     console.log("Creating users...");
+    const superAdminBackupCodes = await (0, totp_1.generateBackupCodes)();
     const [superAdmin, orgAdmin, staff, parent] = await User_1.User.insertMany([
         {
             name: "Super Admin",
@@ -53,7 +61,11 @@ const seed = async () => {
             passwordHash: await bcryptjs_1.default.hash("super123", 10),
             role: "superAdmin",
             organizationId: null,
-            isActive: true
+            isActive: true,
+            twoFactorEnabled: true,
+            twoFactorSecret: (0, totp_1.encryptSecretForStorage)(SEED_SUPER_ADMIN_TOTP_SECRET),
+            twoFactorVerifiedAt: new Date(),
+            backupCodes: superAdminBackupCodes.hashed
         },
         {
             name: "Demo School Admin",
@@ -100,33 +112,52 @@ const seed = async () => {
     }));
     const buses = await Bus_1.Bus.insertMany(busPayload);
     console.log(`Created ${buses.length} buses`);
-    console.log("Creating students...");
-    const studentPayload = buses.flatMap((bus, busIndex) => Array.from({ length: 5 }).map((_, studentIndex) => ({
+    console.log("Creating 30 students (no bus assignment on student record)...");
+    const studentPayload = Array.from({ length: 30 }).map((_, index) => ({
         organizationId: orgId,
-        name: `Student ${busIndex + 1}-${studentIndex + 1}`,
-        grade: `${(studentIndex % 5) + 1}`,
-        parentName: `Parent ${busIndex + 1}-${studentIndex + 1}`,
-        parentPhone: `8000000${busIndex}${studentIndex}`.slice(-10),
-        address: `Address line for Student ${busIndex + 1}-${studentIndex + 1}`,
-        busId: bus._id,
-        monthlyFee: 1500,
+        name: `Student ${index + 1}`,
+        grade: `${(index % 5) + 1}`,
+        parentName: `Parent ${index + 1}`,
+        parentPhone: `8000000${String(index).padStart(3, "0")}`.slice(-10),
+        address: `Address for Student ${index + 1}`,
         status: "active",
-        academicYear: "2025-26"
-    })));
+        academicYear: ACADEMIC_YEAR
+    }));
     const students = await Student_1.Student.insertMany(studentPayload);
     console.log(`Created ${students.length} students`);
-    const student1 = students[0];
-    const student2 = students[1];
     await User_1.User.findByIdAndUpdate(parent._id, {
-        parentStudentIds: [student1._id, student2._id]
+        parentStudentIds: [students[0]._id, students[1]._id]
     });
     console.log("Linked parent to students 1 and 2");
-    console.log("Creating fee payments...");
+    console.log("Creating transport registrations...");
+    const transportAssignments = [
+        { studentIndexes: [0, 1, 2, 3, 4], busIndex: 0, fee: 1500, pickupStop: "Koramangala" },
+        { studentIndexes: [5, 6, 7, 8, 9], busIndex: 1, fee: 1500 },
+        { studentIndexes: [10, 11, 12, 13, 14], busIndex: 2, fee: 1800 },
+        { studentIndexes: [15, 16, 17], busIndex: 3, fee: 1500 },
+        { studentIndexes: [20, 21, 22], busIndex: 4, fee: 1500 },
+        { studentIndexes: [25, 26, 27], busIndex: 5, fee: 1500 }
+    ];
+    const transports = await StudentTransport_1.StudentTransport.insertMany(transportAssignments.flatMap(({ studentIndexes, busIndex, fee, pickupStop }) => studentIndexes.map((studentIndex) => ({
+        organizationId: orgId,
+        studentId: students[studentIndex]._id,
+        busId: buses[busIndex]._id,
+        monthlyTransportFee: fee,
+        pickupStop,
+        effectiveFrom: new Date("2025-04-01T00:00:00.000Z"),
+        effectiveTo: null,
+        status: "active",
+        academicYear: ACADEMIC_YEAR,
+        addedBy: orgAdmin._id
+    }))));
+    console.log(`Created ${transports.length} active transport records (18 on bus, 12 not using bus)`);
+    const transportByStudent = new Map(transports.map((t) => [String(t.studentId), t]));
+    console.log("Creating fee payments for transport-registered students...");
     const months = ["2025-04", "2025-05", "2025-06", "2025-07", "2025-08"];
     const statusCycle = ["paid", "partial", "pending", "overdue"];
-    const feePaymentPayload = students.flatMap((student, studentIndex) => months.map((month, monthIndex) => {
-        const status = statusCycle[(studentIndex + monthIndex) % statusCycle.length];
-        const amount = student.monthlyFee;
+    const feePaymentPayload = transports.flatMap((transport, transportIndex) => months.map((month, monthIndex) => {
+        const status = statusCycle[(transportIndex + monthIndex) % statusCycle.length];
+        const amount = transport.monthlyTransportFee;
         let amountPaid = 0;
         let paidAt;
         let collectedBy;
@@ -152,10 +183,11 @@ const seed = async () => {
         }
         return {
             organizationId: orgId,
-            studentId: student._id,
-            busId: student.busId,
+            studentId: transport.studentId,
+            busId: transport.busId,
+            transportId: transport._id,
             month,
-            academicYear: "2025-26",
+            academicYear: ACADEMIC_YEAR,
             amount,
             amountPaid,
             status,
@@ -176,7 +208,7 @@ const seed = async () => {
             date: new Date("2025-04-05T10:00:00.000Z"),
             vendor: "Local Fuel Station",
             notes: "Monthly diesel refill",
-            academicYear: "2025-26",
+            academicYear: ACADEMIC_YEAR,
             addedBy: orgAdmin._id
         },
         {
@@ -187,7 +219,7 @@ const seed = async () => {
             date: new Date("2025-04-15T10:00:00.000Z"),
             vendor: "City Auto Garage",
             notes: "Routine maintenance",
-            academicYear: "2025-26",
+            academicYear: ACADEMIC_YEAR,
             addedBy: orgAdmin._id
         },
         {
@@ -198,7 +230,7 @@ const seed = async () => {
             date: new Date("2025-04-20T10:00:00.000Z"),
             vendor: "Accessories Shop",
             notes: "Cleaning and accessories",
-            academicYear: "2025-26",
+            academicYear: ACADEMIC_YEAR,
             addedBy: staff._id
         }
     ]);
@@ -208,7 +240,7 @@ const seed = async () => {
     const feeStructure = await FeeStructure_1.FeeStructure.create({
         organizationId: orgId,
         name: "Standard Fee Structure 2025-26",
-        academicYear: "2025-26",
+        academicYear: ACADEMIC_YEAR,
         applicableGrades: [],
         feeHeads: [
             {
@@ -238,13 +270,14 @@ const seed = async () => {
         ],
         isActive: true
     });
-    const assignResult = await (0, schoolFeeLedger_1.assignFeeStructureToStudents)(orgId, feeStructure, students.map((s) => s._id), "2025-26");
+    const assignResult = await (0, schoolFeeLedger_1.assignFeeStructureToStudents)(orgId, feeStructure, students.map((s) => s._id), ACADEMIC_YEAR);
     console.log(`Assigned fee structure to ${assignResult.assignments} students, ${assignResult.ledgerEntries} ledger entries created`);
+    const student1 = students[0];
     const aprilLedger = await FeeLedger_1.FeeLedger.findOne({
         studentId: student1._id,
         feeHeadName: "Tuition Fee",
         periodLabel: "2025-04",
-        academicYear: "2025-26"
+        academicYear: ACADEMIC_YEAR
     });
     if (aprilLedger) {
         aprilLedger.amountPaid = aprilLedger.amountDue;
@@ -253,7 +286,7 @@ const seed = async () => {
             organizationId: orgId,
             studentId: student1._id,
             receiptNumber: "RCP-SEED-SAMPLE01",
-            academicYear: "2025-26",
+            academicYear: ACADEMIC_YEAR,
             paymentDate: new Date("2025-04-08T10:00:00.000Z"),
             paymentMode: "cash",
             collectedBy: staff._id,
@@ -274,8 +307,9 @@ const seed = async () => {
         });
         aprilLedger.paymentId = samplePayment._id;
         await aprilLedger.save();
-        console.log("Created sample school fee payment for Student 1-1 (April tuition)");
+        console.log("Created sample school fee payment for Student 1 (April tuition)");
     }
+    void transportByStudent;
     console.log("\n--- Seed credentials ---");
     console.log("Super Admin: super@bustrack.com / super123");
     console.log("Org Admin:   admin@demoschool.com / admin123");

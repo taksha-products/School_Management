@@ -6,7 +6,7 @@ import path from "path";
 
 import { loginAs } from "../helpers/auth";
 
-const API_URL = process.env.API_URL ?? "http://localhost:5000";
+const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
 const fixturesDir = path.resolve(process.cwd(), "tests", "fixtures");
 const validFile = path.join(fixturesDir, "students_valid.xlsx");
 const invalidFile = path.join(fixturesDir, "students_with_errors.xlsx");
@@ -19,7 +19,7 @@ const previewViaApi = async (
   summary: { total: number; valid: number; warnings: number; errors: number };
   errors: Array<{ row: number; message: string }>;
 }> => {
-  const response = await page.request.post(`${API_URL}/api/bulk/students/preview`, {
+  const response = await page.request.post(`${BASE_URL}/api/bulk/students/preview`, {
     multipart: {
       file: {
         name: path.basename(filePath),
@@ -27,9 +27,6 @@ const previewViaApi = async (
           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         buffer: fs.readFileSync(filePath)
       }
-    },
-    headers: {
-      Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem("bustrack_token"))}`
     }
   });
   expect(response.ok()).toBeTruthy();
@@ -53,7 +50,7 @@ test.describe("Bulk operations", () => {
   test("template download returns an Excel file", async ({ page }) => {
     await page.goto("/admin/bulk/upload-students");
     await page.getByRole("button", { name: "Download Student Template" }).click();
-    const response = await page.request.get(`${API_URL}/api/bulk/templates/students`);
+    const response = await page.request.get(`${BASE_URL}/api/bulk/templates/students`);
     expect(response.ok()).toBeTruthy();
     expect(response.headers()["content-type"]).toContain(
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -81,11 +78,8 @@ test.describe("Bulk operations", () => {
     await page.goto("/admin/bulk/upload-students");
     const preview = await previewViaApi(page, validFile);
     const validRows = preview.preview.filter((row) => row.status !== "error");
-    const confirmResponse = await page.request.post(`${API_URL}/api/bulk/students/confirm`, {
-      headers: {
-        Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem("bustrack_token"))}`,
-        "Content-Type": "application/json"
-      },
+    const confirmResponse = await page.request.post(`${BASE_URL}/api/bulk/students/confirm`, {
+      headers: { "Content-Type": "application/json" },
       data: {
         rows: validRows,
         skipWarnings: false,
@@ -96,8 +90,6 @@ test.describe("Bulk operations", () => {
     const confirmJson = (await confirmResponse.json()) as { data: { created: number } };
     expect(confirmJson.data.created).toBeGreaterThanOrEqual(5);
 
-    const token = await page.evaluate(() => localStorage.getItem("bustrack_token"));
-    expect(token).toBeTruthy();
     for (const name of [
       "Rahul Sharma",
       "Priya Patel",
@@ -105,8 +97,7 @@ test.describe("Bulk operations", () => {
       "Neha Gupta",
       "Karan Singh"
     ]) {
-      const res = await page.request.get(`${API_URL}/api/students`, {
-        headers: { Authorization: `Bearer ${token}` },
+      const res = await page.request.get(`${BASE_URL}/api/students`, {
         params: { search: name, status: "active", page: 1, limit: 50 }
       });
       expect(res.ok()).toBeTruthy();
@@ -117,11 +108,8 @@ test.describe("Bulk operations", () => {
 
   test("bulk bus assignment updates student records", async ({ page }) => {
     await page.goto("/admin/bulk/assign-buses");
-    const token = await page.evaluate(() => localStorage.getItem("bustrack_token"));
-    expect(token).toBeTruthy();
 
-    const studentsResponse = await page.request.get(`${API_URL}/api/students`, {
-      headers: { Authorization: `Bearer ${token}` },
+    const studentsResponse = await page.request.get(`${BASE_URL}/api/students`, {
       params: { status: "active", page: 1, limit: 100 }
     });
     expect(studentsResponse.ok()).toBeTruthy();
@@ -131,9 +119,7 @@ test.describe("Bulk operations", () => {
     const grade6Ids = studentsBody.data.filter((student) => student.grade === "6").map((student) => student._id);
     expect(grade6Ids.length).toBeGreaterThan(0);
 
-    const busResponse = await page.request.get(`${API_URL}/api/buses`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    const busResponse = await page.request.get(`${BASE_URL}/api/buses`);
     expect(busResponse.ok()).toBeTruthy();
     const buses = (await busResponse.json()) as {
       data: Array<{ _id: string; busNumber: string; status: "active" | "inactive" }>;
@@ -141,8 +127,8 @@ test.describe("Bulk operations", () => {
     const targetBus = buses.data.find((bus) => bus.status === "active");
     expect(targetBus?._id).toBeTruthy();
 
-    const assignResponse = await page.request.post(`${API_URL}/api/bulk/students/assign-bus`, {
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    const assignResponse = await page.request.post(`${BASE_URL}/api/bulk/students/assign-bus`, {
+      headers: { "Content-Type": "application/json" },
       data: {
         studentIds: grade6Ids,
         busId: targetBus!._id,
@@ -152,8 +138,7 @@ test.describe("Bulk operations", () => {
     });
     expect(assignResponse.ok()).toBeTruthy();
 
-    const verifyResponse = await page.request.get(`${API_URL}/api/students`, {
-      headers: { Authorization: `Bearer ${token}` },
+    const verifyResponse = await page.request.get(`${BASE_URL}/api/students`, {
       params: { status: "active", withTransport: true, page: 1, limit: 100 }
     });
     expect(verifyResponse.ok()).toBeTruthy();
@@ -173,12 +158,9 @@ test.describe("Bulk operations", () => {
 
   test("bulk fee mark paid updates all selected students", async ({ page }) => {
     await page.goto("/admin/bulk/fee-collection");
-    const token = await page.evaluate(() => localStorage.getItem("bustrack_token"));
-    expect(token).toBeTruthy();
 
     const month = `${new Date().getFullYear() + 50}-${String((Date.now() % 12) + 1).padStart(2, "0")}`;
-    const listResponse = await page.request.get(`${API_URL}/api/fees`, {
-      headers: { Authorization: `Bearer ${token}` },
+    const listResponse = await page.request.get(`${BASE_URL}/api/fees`, {
       params: { month, page: 1, limit: 100 }
     });
     expect(listResponse.ok()).toBeTruthy();
@@ -193,8 +175,8 @@ test.describe("Bulk operations", () => {
       return;
     }
 
-    const markResponse = await page.request.post(`${API_URL}/api/bulk/fees/mark-paid`, {
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    const markResponse = await page.request.post(`${BASE_URL}/api/bulk/fees/mark-paid`, {
+      headers: { "Content-Type": "application/json" },
       data: {
         paymentIds: pendingIds.slice(0, 100),
         paymentMode: "cash",
@@ -205,8 +187,7 @@ test.describe("Bulk operations", () => {
     const markBody = (await markResponse.json()) as { data: { marked: number } };
     expect(markBody.data.marked).toBeGreaterThan(0);
 
-    const verifyResponse = await page.request.get(`${API_URL}/api/fees`, {
-      headers: { Authorization: `Bearer ${token}` },
+    const verifyResponse = await page.request.get(`${BASE_URL}/api/fees`, {
       params: { month, page: 1, limit: 100 }
     });
     expect(verifyResponse.ok()).toBeTruthy();
@@ -224,10 +205,8 @@ test.describe("Bulk operations", () => {
     await page.goto("/admin/bulk/grade-promotion");
     await expect(page.getByRole("heading", { name: "Grade Promotion" })).toBeVisible();
 
-    const token = await page.evaluate(() => localStorage.getItem("bustrack_token"));
-    expect(token).toBeTruthy();
-    const previewResponse = await page.request.post(`${API_URL}/api/bulk/students/promote`, {
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    const previewResponse = await page.request.post(`${BASE_URL}/api/bulk/students/promote`, {
+      headers: { "Content-Type": "application/json" },
       data: {
         academicYear: "2026-27",
         promotionMap: {
@@ -265,13 +244,7 @@ test.describe("Bulk operations", () => {
   test("export downloads a file", async ({ page }) => {
     await page.goto("/admin/bulk/export");
     await page.getByRole("button", { name: "Export to Excel" }).first().click();
-    const token = await page.evaluate(() => localStorage.getItem("bustrack_token"));
-    expect(token).toBeTruthy();
-    const response = await page.request.get(`${API_URL}/api/bulk/export/students`, {
-      headers: {
-        Authorization: `Bearer ${token}`
-      }
-    });
+    const response = await page.request.get(`${BASE_URL}/api/bulk/export/students`);
     expect(response.ok()).toBeTruthy();
     expect(response.headers()["content-type"]).toContain(
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

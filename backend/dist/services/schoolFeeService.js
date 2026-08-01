@@ -1,12 +1,84 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.buildOrgFeeSummary = exports.buildReceiptView = exports.buildStudentFeeLedgerView = void 0;
+exports.buildOrgFeeSummary = exports.buildReceiptView = exports.buildStudentFeeLedgerView = exports.formatStudentFeeStatusLabel = exports.buildStudentFeeStatusMapsByYear = exports.buildStudentFeeStatusMap = void 0;
 const mongoose_1 = require("mongoose");
 const FeeLedger_1 = require("../models/FeeLedger");
 const SchoolFeePayment_1 = require("../models/SchoolFeePayment");
 const Student_1 = require("../models/Student");
+const StudentTransport_1 = require("../models/StudentTransport");
 const StudentFeeAssignment_1 = require("../models/StudentFeeAssignment");
 const schoolFeeLedger_1 = require("../utils/schoolFeeLedger");
+const buildStudentFeeStatusMap = async (organizationId, academicYear) => {
+    const organizationObjectId = new mongoose_1.Types.ObjectId(organizationId);
+    await (0, schoolFeeLedger_1.refreshOverdueStatuses)({
+        organizationId: organizationObjectId,
+        academicYear
+    });
+    const [assignments, balanceRows] = await Promise.all([
+        StudentFeeAssignment_1.StudentFeeAssignment.find({
+            organizationId: organizationObjectId,
+            academicYear,
+            isActive: true
+        }).select("studentId"),
+        FeeLedger_1.FeeLedger.aggregate([
+            { $match: { organizationId: organizationObjectId, academicYear } },
+            {
+                $group: {
+                    _id: "$studentId",
+                    balance: {
+                        $sum: {
+                            $max: [
+                                0,
+                                { $subtract: [{ $add: ["$amountDue", "$lateFee"] }, "$amountPaid"] }
+                            ]
+                        }
+                    }
+                }
+            }
+        ])
+    ]);
+    const statusMap = {};
+    for (const assignment of assignments) {
+        const studentId = String(assignment.studentId);
+        statusMap[studentId] = { balance: 0, assigned: true };
+    }
+    for (const row of balanceRows) {
+        const studentId = String(row._id);
+        const existing = statusMap[studentId];
+        statusMap[studentId] = {
+            balance: row.balance,
+            assigned: existing?.assigned ?? false
+        };
+    }
+    return statusMap;
+};
+exports.buildStudentFeeStatusMap = buildStudentFeeStatusMap;
+const buildStudentFeeStatusMapsByYear = async (organizationId, academicYears) => {
+    const uniqueYears = [...new Set(academicYears.filter((year) => year.length > 0))];
+    const maps = await Promise.all(uniqueYears.map(async (academicYear) => ({
+        academicYear,
+        statusMap: await (0, exports.buildStudentFeeStatusMap)(organizationId, academicYear)
+    })));
+    return new Map(maps.map(({ academicYear, statusMap }) => [academicYear, statusMap]));
+};
+exports.buildStudentFeeStatusMapsByYear = buildStudentFeeStatusMapsByYear;
+const formatStudentFeeStatusLabel = (entry) => {
+    if (!entry?.assigned) {
+        return { feeStatus: "Fees not assigned", outstandingAmount: 0 };
+    }
+    if (entry.balance <= 0) {
+        return { feeStatus: "All paid", outstandingAmount: 0 };
+    }
+    const rounded = Math.round(entry.balance * 100) / 100;
+    const formatted = new Intl.NumberFormat("en-IN", {
+        maximumFractionDigits: 0
+    }).format(rounded);
+    return {
+        feeStatus: `₹${formatted} due`,
+        outstandingAmount: rounded
+    };
+};
+exports.formatStudentFeeStatusLabel = formatStudentFeeStatusLabel;
 const buildStudentFeeLedgerView = async (organizationId, studentId, academicYear) => {
     const orgObjectId = new mongoose_1.Types.ObjectId(organizationId);
     const studentObjectId = new mongoose_1.Types.ObjectId(studentId);
@@ -18,10 +90,15 @@ const buildStudentFeeLedgerView = async (organizationId, studentId, academicYear
     const student = await Student_1.Student.findOne({
         _id: studentObjectId,
         organizationId: orgObjectId
-    }).populate("busId", "busNumber routeName");
+    });
     if (!student) {
         return null;
     }
+    const transport = await StudentTransport_1.StudentTransport.findOne({
+        organizationId: orgObjectId,
+        studentId: studentObjectId,
+        status: "active"
+    }).populate("busId", "busNumber routeName");
     const assignment = await StudentFeeAssignment_1.StudentFeeAssignment.findOne({
         organizationId: orgObjectId,
         studentId: studentObjectId,
@@ -95,7 +172,7 @@ const buildStudentFeeLedgerView = async (organizationId, studentId, academicYear
             grade: student.grade,
             parentName: student.parentName,
             parentPhone: student.parentPhone,
-            bus: student.busId
+            bus: transport?.busId ?? null
         },
         assignment,
         feeHeads: Array.from(byFeeHead.values()),

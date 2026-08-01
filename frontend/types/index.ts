@@ -20,8 +20,10 @@ export interface StudentTransportInfo {
 
 export interface Student {
   _id: string;
+  admissionNo?: string;
   name: string;
   grade: string;
+  section?: string;
   parentName: string;
   parentPhone: string;
   address?: string;
@@ -56,6 +58,11 @@ export interface FeePayment {
   paidAt?: string;
   collectedBy?: string;
   notes?: string;
+  paymentMode?: string;
+  razorpayOrderId?: string;
+  razorpayPaymentId?: string;
+  collectedAt?: string;
+  paymentNotes?: string;
 }
 
 export interface Expense {

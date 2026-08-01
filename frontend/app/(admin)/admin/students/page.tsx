@@ -21,7 +21,7 @@ import { downloadFromApi } from "@/lib/fileDownload";
 import { formatINR } from "@/lib/utils";
 import type { PaginatedResponse } from "@/types/pagination";
 import type { Bus, FeePayment, Student } from "@/types";
-import type { OutstandingStudent } from "@/types/schoolFees";
+import type { StudentFeeStatusMap } from "@/types/schoolFees";
 
 const studentSchema = z.object({
   name: z.string().min(2),
@@ -50,13 +50,19 @@ const StudentsPage = (): JSX.Element => {
   const [transportStudent, setTransportStudent] = useState<Student | null>(null);
   const [search, setSearch] = useState("");
   const [busFilter, setBusFilter] = useState("");
+  const [gradeFilter, setGradeFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("active");
   const [page, setPage] = useState(1);
   const [isExporting, setIsExporting] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [deactivateConfirmOpen, setDeactivateConfirmOpen] = useState(false);
+
+  const showBulkSelect = statusFilter === "active";
 
   useEffect(() => {
     setPage(1);
-  }, [search, busFilter, statusFilter]);
+    setSelectedIds([]);
+  }, [search, busFilter, gradeFilter, statusFilter]);
 
   const form = useForm<StudentForm>({
     resolver: zodResolver(studentSchema),
@@ -68,14 +74,20 @@ const StudentsPage = (): JSX.Element => {
     queryFn: async () => (await api.get<{ data: Bus[] }>("/api/buses")).data.data
   });
 
+  const gradesQuery = useQuery({
+    queryKey: ["student-grades"],
+    queryFn: async () => (await api.get<{ data: string[] }>("/api/students/grades")).data.data
+  });
+
   const studentsQuery = useQuery({
-    queryKey: ["students", { page, search, busId: busFilter, status: statusFilter }],
+    queryKey: ["students", { page, search, busId: busFilter, grade: gradeFilter, status: statusFilter }],
     queryFn: async () =>
       (
         await api.get<PaginatedResponse<Student>>("/api/students", {
           params: {
             search: search || undefined,
             busId: busFilter || undefined,
+            grade: gradeFilter || undefined,
             status: statusFilter || undefined,
             withTransport: true,
             page,
@@ -125,20 +137,58 @@ const StudentsPage = (): JSX.Element => {
     onError: () => showToast("error", "Failed to save student")
   });
 
-  const outstandingQuery = useQuery({
-    queryKey: ["students-fee-outstanding", ACADEMIC_YEAR],
+  const feeStatusQuery = useQuery({
+    queryKey: ["students-fee-status", ACADEMIC_YEAR],
     queryFn: async () => {
-      const res = await api.get<PaginatedResponse<OutstandingStudent>>(
-        "/api/school-fees/outstanding",
-        { params: { academicYear: ACADEMIC_YEAR, page: 1, limit: 500 } }
-      );
-      return new Map(res.data.data.map((row) => [row.studentId, row.balance]));
+      const res = await api.get<{ data: StudentFeeStatusMap }>("/api/school-fees/student-fee-status", {
+        params: { academicYear: ACADEMIC_YEAR }
+      });
+      return res.data.data;
     }
   });
 
   const rows = useMemo(() => studentsQuery.data?.data ?? [], [studentsQuery.data]);
   const pagination = studentsQuery.data?.pagination;
-  const outstandingByStudent = outstandingQuery.data ?? new Map<string, number>();
+  const feeStatusByStudent = feeStatusQuery.data ?? {};
+
+  const allVisibleSelected =
+    rows.length > 0 && rows.every((student) => selectedIds.includes(student._id));
+
+  const toggleStudentSelection = (studentId: string): void => {
+    setSelectedIds((prev) =>
+      prev.includes(studentId) ? prev.filter((id) => id !== studentId) : [...prev, studentId]
+    );
+  };
+
+  const toggleSelectAllVisible = (): void => {
+    if (allVisibleSelected) {
+      const visibleIds = new Set(rows.map((student) => student._id));
+      setSelectedIds((prev) => prev.filter((id) => !visibleIds.has(id)));
+      return;
+    }
+    const merged = new Set([...selectedIds, ...rows.map((student) => student._id)]);
+    setSelectedIds(Array.from(merged));
+  };
+
+  const bulkDeactivateMutation = useMutation({
+    mutationFn: async (studentIds: string[]) =>
+      (
+        await api.post<{ data: { deactivated: number } }>("/api/students/bulk-deactivate", {
+          studentIds
+        })
+      ).data,
+    onSuccess: (res) => {
+      const count = res.data.deactivated;
+      void queryClient.invalidateQueries({ queryKey: ["students"] });
+      setSelectedIds([]);
+      setDeactivateConfirmOpen(false);
+      showToast(
+        "success",
+        `${count} student${count === 1 ? "" : "s"} deactivated`
+      );
+    },
+    onError: () => showToast("error", "Failed to deactivate students")
+  });
 
   const handleExport = async (): Promise<void> => {
     try {
@@ -148,6 +198,7 @@ const StudentsPage = (): JSX.Element => {
         `bustrack_students_${new Date().toISOString().slice(0, 10)}.xlsx`,
         {
           busId: busFilter || undefined,
+          grade: gradeFilter || undefined,
           status: statusFilter || undefined
         }
       );
@@ -180,12 +231,12 @@ const StudentsPage = (): JSX.Element => {
       }
     >
       <Card>
-        <div className="mb-3 grid gap-2 md:grid-cols-3">
+        <div className="mb-3 grid gap-2 md:grid-cols-4">
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search student name"
-            className="rounded border border-slate-200 px-3 py-2"
+            className="rounded border border-slate-200 px-3 py-2 md:col-span-1"
           />
           <select
             value={busFilter}
@@ -196,6 +247,18 @@ const StudentsPage = (): JSX.Element => {
             {(busesQuery.data ?? []).map((bus) => (
               <option key={bus._id} value={bus._id}>
                 {bus.busNumber}
+              </option>
+            ))}
+          </select>
+          <select
+            value={gradeFilter}
+            onChange={(e) => setGradeFilter(e.target.value)}
+            className="rounded border border-slate-200 px-3 py-2"
+          >
+            <option value="">All grades</option>
+            {(gradesQuery.data ?? []).map((grade) => (
+              <option key={grade} value={grade}>
+                {grade}
               </option>
             ))}
           </select>
@@ -216,6 +279,17 @@ const StudentsPage = (): JSX.Element => {
             <table className="min-w-[900px] w-full text-sm">
               <thead className="text-left text-slate-500">
                 <tr>
+                  {showBulkSelect && (
+                    <th className="w-10 py-2">
+                      <input
+                        type="checkbox"
+                        checked={allVisibleSelected}
+                        onChange={toggleSelectAllVisible}
+                        aria-label="Select all students on this page"
+                        className="h-4 w-4 rounded border-slate-300"
+                      />
+                    </th>
+                  )}
                   <th>Name</th>
                   <th>Grade</th>
                   <th>Transport</th>
@@ -232,6 +306,17 @@ const StudentsPage = (): JSX.Element => {
                     className="cursor-pointer border-t border-slate-100"
                     onClick={() => setSelectedStudent(student)}
                   >
+                    {showBulkSelect && (
+                      <td className="py-2" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.includes(student._id)}
+                          onChange={() => toggleStudentSelection(student._id)}
+                          aria-label={`Select ${student.name}`}
+                          className="h-4 w-4 rounded border-slate-300"
+                        />
+                      </td>
+                    )}
                     <td className="py-2">{student.name}</td>
                     <td>{student.grade}</td>
                     <td>
@@ -255,19 +340,24 @@ const StudentsPage = (): JSX.Element => {
                     </td>
                     <td>
                       {(() => {
-                        const due = outstandingByStudent.get(student._id) ?? 0;
-                        if (due <= 0) {
+                        const feeStatus = feeStatusByStudent[student._id];
+                        if (!feeStatus?.assigned) {
+                          return (
+                            <span className="text-xs font-medium text-gray-500">Fees not assigned</span>
+                          );
+                        }
+                        if (feeStatus.balance <= 0) {
                           return (
                             <span className="text-xs font-medium text-emerald-700">All paid</span>
                           );
                         }
                         return (
                           <Link
-                            href={`/admin/fees?studentId=${student._id}`}
+                            href={`/admin/school-fees?studentId=${student._id}`}
                             onClick={(e) => e.stopPropagation()}
                             className="text-xs font-medium text-rose-600 hover:underline"
                           >
-                            {formatINR(due)} due
+                            {formatINR(feeStatus.balance)} due
                           </Link>
                         );
                       })()}
@@ -315,6 +405,50 @@ const StudentsPage = (): JSX.Element => {
           <ListPagination pagination={pagination} noun="students" onPageChange={setPage} />
         )}
       </Card>
+
+      {showBulkSelect && selectedIds.length > 0 && (
+        <div className="fixed bottom-6 left-1/2 z-40 flex w-[min(100%,36rem)] -translate-x-1/2 items-center justify-between gap-4 rounded-xl border border-gray-200 bg-white px-5 py-3 shadow-lg">
+          <p className="text-sm font-medium text-gray-900">
+            {selectedIds.length} student{selectedIds.length === 1 ? "" : "s"} selected
+          </p>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button variant="secondary" size="sm" onClick={() => setSelectedIds([])}>
+              Clear
+            </Button>
+            <Button size="sm" onClick={() => setDeactivateConfirmOpen(true)}>
+              Deactivate Selected
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <Modal
+        isOpen={deactivateConfirmOpen}
+        onClose={() => setDeactivateConfirmOpen(false)}
+        title="Deactivate students"
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => setDeactivateConfirmOpen(false)}
+              disabled={bulkDeactivateMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => bulkDeactivateMutation.mutate(selectedIds)}
+              disabled={bulkDeactivateMutation.isPending}
+            >
+              {bulkDeactivateMutation.isPending ? "Deactivating…" : "Confirm"}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-gray-600">
+          Deactivate {selectedIds.length} student{selectedIds.length === 1 ? "" : "s"}? They will
+          be hidden from the active students list but their records will be preserved.
+        </p>
+      </Modal>
 
       {selectedStudent && (
         <Card title={`Fee history - ${selectedStudent.name}`}>

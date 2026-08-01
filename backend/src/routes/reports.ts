@@ -9,7 +9,7 @@ import { Bus } from "../models/Bus";
 import { Student } from "../models/Student";
 import { StudentTransport } from "../models/StudentTransport";
 import { asyncHandler } from "../utils/asyncHandler";
-import { cacheGet, cacheSet } from "../utils/cache";
+import { getCached, orgCacheKey, setCached } from "../utils/cache";
 import { getScopedOrganizationId } from "../utils/orgFilter";
 
 const reportsRouter = Router();
@@ -52,8 +52,8 @@ reportsRouter.get(
     }
 
     const orgIdStr = getScopedOrganizationId(authReq, res)!;
-    const cacheKey = `${orgIdStr}:reports:monthly:${monthKey}`;
-    const cached = cacheGet<unknown[]>(cacheKey);
+    const cacheKey = orgCacheKey(orgIdStr, `reports:monthly:${monthKey}`);
+    const cached = await getCached<unknown[]>(cacheKey);
     if (cached) {
       res.json({ success: true, data: cached, message: "Monthly report fetched successfully" });
       return;
@@ -182,7 +182,7 @@ reportsRouter.get(
       { $sort: { busNumber: 1 } }
     ]);
 
-    cacheSet(cacheKey, summary, 300);
+    await setCached(cacheKey, summary, 300);
     res.json({ success: true, data: summary, message: "Monthly report fetched successfully" });
   })
 );
@@ -210,8 +210,8 @@ reportsRouter.get(
     }
 
     const orgIdStr = getScopedOrganizationId(authReq, res)!;
-    const cacheKey = `${orgIdStr}:reports:bus:${busIdParam}:${academicYear}`;
-    const cached = cacheGet<unknown[]>(cacheKey);
+    const cacheKey = orgCacheKey(orgIdStr, `reports:bus:${busIdParam}:${academicYear}`);
+    const cached = await getCached<unknown[]>(cacheKey);
     if (cached) {
       res.json({ success: true, data: cached, message: "Bus trend fetched successfully" });
       return;
@@ -317,7 +317,7 @@ reportsRouter.get(
       }
     ]);
 
-    cacheSet(cacheKey, trend, 600);
+    await setCached(cacheKey, trend, 600);
     res.json({ success: true, data: trend, message: "Bus trend fetched successfully" });
   })
 );
@@ -339,8 +339,8 @@ reportsRouter.get(
     }
 
     const orgIdStr = getScopedOrganizationId(authReq, res)!;
-    const cacheKey = `${orgIdStr}:reports:summary:${month}`;
-    const cached = cacheGet<Record<string, number>>(cacheKey);
+    const cacheKey = orgCacheKey(orgIdStr, `reports:summary:${month}`);
+    const cached = await getCached<Record<string, number>>(cacheKey);
     if (cached) {
       res.json({
         success: true,
@@ -491,7 +491,7 @@ reportsRouter.get(
       onBusStudents,
       totalStudents: totalSchoolStudents
     };
-    cacheSet(cacheKey, data, 300);
+    await setCached(cacheKey, data, 300);
     res.json({
       success: true,
       data,

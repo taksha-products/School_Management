@@ -7,7 +7,9 @@ const requireOrgScope_1 = require("../middleware/requireOrgScope");
 const roleCheck_1 = require("../middleware/roleCheck");
 const SchoolFeePayment_1 = require("../models/SchoolFeePayment");
 const Student_1 = require("../models/Student");
+const StudentTransport_1 = require("../models/StudentTransport");
 const schoolFeeService_1 = require("../services/schoolFeeService");
+const schoolFeeCollection_1 = require("../services/schoolFeeCollection");
 const asyncHandler_1 = require("../utils/asyncHandler");
 const orgFilter_1 = require("../utils/orgFilter");
 const parentRouter = (0, express_1.Router)();
@@ -21,12 +23,31 @@ parentRouter.get("/children", ...guard, (0, asyncHandler_1.asyncHandler)(async (
     const children = await Student_1.Student.find({
         ...(0, orgFilter_1.orgFilter)(authReq, res),
         _id: { $in: childIds }
-    })
-        .populate("busId", "busNumber routeName")
-        .select("name grade status academicYear parentName parentPhone");
+    }).select("name grade status academicYear parentName parentPhone");
+    const transports = await StudentTransport_1.StudentTransport.find({
+        ...(0, orgFilter_1.orgFilter)(authReq, res),
+        studentId: { $in: childIds },
+        status: "active"
+    }).populate("busId", "busNumber routeName");
+    const transportByStudent = new Map(transports.map((t) => [String(t.studentId), t]));
+    const data = children.map((child) => {
+        const transport = transportByStudent.get(String(child._id));
+        const bus = transport?.busId;
+        return {
+            ...child.toObject(),
+            transport: transport
+                ? {
+                    busNumber: bus?.busNumber,
+                    routeName: bus?.routeName,
+                    monthlyTransportFee: transport.monthlyTransportFee,
+                    pickupStop: transport.pickupStop
+                }
+                : null
+        };
+    });
     res.json({
         success: true,
-        data: children,
+        data,
         message: "Children fetched successfully"
     });
 }));
@@ -62,6 +83,50 @@ parentRouter.get("/children/:studentId/fees", ...guard, (0, asyncHandler_1.async
         data,
         message: "Child fee ledger fetched successfully"
     });
+}));
+parentRouter.post("/children/:studentId/payment-intent", ...guard, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    const authReq = req;
+    const studentId = String(req.params.studentId);
+    const { academicYear, payments, notes } = req.body;
+    if (!assertParentChild(authReq, studentId)) {
+        res.status(403).json({
+            success: false,
+            data: null,
+            message: "Forbidden: not your child"
+        });
+        return;
+    }
+    if (!academicYear || !Array.isArray(payments) || payments.length === 0) {
+        res.status(400).json({
+            success: false,
+            data: null,
+            message: "academicYear and payments[] are required"
+        });
+        return;
+    }
+    const orgId = (0, orgFilter_1.getScopedOrganizationId)(authReq, res);
+    try {
+        const intent = await (0, schoolFeeCollection_1.createSchoolPaymentIntent)({
+            organizationId: orgId,
+            studentId,
+            academicYear,
+            payments,
+            createdBy: authReq.user.userId,
+            notes
+        });
+        res.status(201).json({
+            success: true,
+            data: intent,
+            message: "Payment intent created"
+        });
+    }
+    catch (error) {
+        res.status(400).json({
+            success: false,
+            data: null,
+            message: error instanceof Error ? error.message : "Invalid payment request"
+        });
+    }
 }));
 parentRouter.get("/children/:studentId/payments", ...guard, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     const authReq = req;

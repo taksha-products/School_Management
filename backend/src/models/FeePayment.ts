@@ -1,5 +1,7 @@
 import { model, Schema, type Document, type Types } from "mongoose";
 
+import type { PaymentMode } from "../types/payment";
+
 export type FeePaymentStatus = "paid" | "partial" | "pending" | "overdue";
 
 export type FeePaymentType = "single" | "advance";
@@ -19,6 +21,14 @@ export interface IFeePayment extends Document {
   notes?: string;
   feeGroupId?: Types.ObjectId;
   paymentType?: FeePaymentType;
+  paymentMode: PaymentMode;
+  razorpayOrderId?: string;
+  razorpayPaymentId?: string;
+  razorpaySignature?: string;
+  transactionRef?: string;
+  collectedAt?: Date;
+  paymentNotes?: string;
+  webhookVerified: boolean;
 }
 
 const feePaymentSchema = new Schema<IFeePayment>(
@@ -40,7 +50,29 @@ const feePaymentSchema = new Schema<IFeePayment>(
     collectedBy: { type: Schema.Types.ObjectId, ref: "User" },
     notes: { type: String },
     feeGroupId: { type: Schema.Types.ObjectId, ref: "FeeGroup" },
-    paymentType: { type: String, enum: ["single", "advance"], default: "single" }
+    paymentType: { type: String, enum: ["single", "advance"], default: "single" },
+    paymentMode: {
+      type: String,
+      enum: [
+        "cash",
+        "upi_office",
+        "upi_online",
+        "card",
+        "netbanking",
+        "cheque",
+        "other",
+        "upi",
+        "online"
+      ],
+      default: "cash"
+    },
+    razorpayOrderId: { type: String },
+    razorpayPaymentId: { type: String },
+    razorpaySignature: { type: String },
+    transactionRef: { type: String },
+    collectedAt: { type: Date },
+    paymentNotes: { type: String, maxlength: 500 },
+    webhookVerified: { type: Boolean, default: false }
   },
   { timestamps: true }
 );
@@ -52,5 +84,7 @@ feePaymentSchema.index(
 );
 feePaymentSchema.index({ organizationId: 1, busId: 1, month: 1 });
 feePaymentSchema.index({ organizationId: 1, status: 1 });
+feePaymentSchema.index({ razorpayOrderId: 1 }, { sparse: true });
+feePaymentSchema.index({ razorpayPaymentId: 1 }, { unique: true, sparse: true });
 
 export const FeePayment = model<IFeePayment>("FeePayment", feePaymentSchema);

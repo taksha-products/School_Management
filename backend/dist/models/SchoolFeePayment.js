@@ -18,8 +18,23 @@ const schoolFeePaymentSchema = new mongoose_1.Schema({
     paymentDate: { type: Date, required: true, default: Date.now },
     paymentMode: {
         type: String,
-        enum: ["cash", "upi", "cheque", "online"],
+        enum: [
+            "cash",
+            "upi_office",
+            "upi_online",
+            "card",
+            "netbanking",
+            "cheque",
+            "other",
+            "upi",
+            "online"
+        ],
         default: "cash"
+    },
+    paymentStatus: {
+        type: String,
+        enum: ["pending", "completed"],
+        default: "completed"
     },
     upiTransactionId: { type: String },
     collectedBy: { type: mongoose_1.Schema.Types.ObjectId, ref: "User", required: true },
@@ -27,10 +42,19 @@ const schoolFeePaymentSchema = new mongoose_1.Schema({
     totalAmountDue: { type: Number, required: true },
     totalAmountPaid: { type: Number, required: true },
     totalLateFee: { type: Number, default: 0 },
-    notes: { type: String }
+    notes: { type: String },
+    razorpayOrderId: { type: String },
+    razorpayPaymentId: { type: String },
+    razorpaySignature: { type: String },
+    transactionRef: { type: String },
+    collectedAt: { type: Date },
+    paymentNotes: { type: String, maxlength: 500 },
+    webhookVerified: { type: Boolean, default: false }
 }, { timestamps: true });
 schoolFeePaymentSchema.index({ receiptNumber: 1 }, { unique: true });
 schoolFeePaymentSchema.index({ organizationId: 1, studentId: 1, paymentDate: -1 });
 schoolFeePaymentSchema.index({ organizationId: 1, paymentDate: -1 });
 schoolFeePaymentSchema.index({ organizationId: 1, collectedBy: 1 });
+schoolFeePaymentSchema.index({ razorpayOrderId: 1 }, { sparse: true });
+schoolFeePaymentSchema.index({ razorpayPaymentId: 1 }, { unique: true, sparse: true });
 exports.SchoolFeePayment = (0, mongoose_1.model)("SchoolFeePayment", schoolFeePaymentSchema);

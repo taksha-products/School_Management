@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const mongoose_1 = require("mongoose");
 const auth_1 = require("../middleware/auth");
+const featureFlag_1 = require("../middleware/featureFlag");
 const orgScope_1 = require("../middleware/orgScope");
 const requireOrgScope_1 = require("../middleware/requireOrgScope");
 const roleCheck_1 = require("../middleware/roleCheck");
@@ -10,6 +11,8 @@ const FeeLedger_1 = require("../models/FeeLedger");
 const SchoolFeePayment_1 = require("../models/SchoolFeePayment");
 const Student_1 = require("../models/Student");
 const schoolFeeService_1 = require("../services/schoolFeeService");
+const schoolFeeCollection_1 = require("../services/schoolFeeCollection");
+const schoolFeeAssignmentService_1 = require("../services/schoolFeeAssignmentService");
 const asyncHandler_1 = require("../utils/asyncHandler");
 const validate_1 = require("../middleware/validate");
 const cache_1 = require("../utils/cache");
@@ -18,7 +21,13 @@ const paginate_1 = require("../utils/paginate");
 const schoolFees_1 = require("../validators/schoolFees");
 const schoolFeeLedger_1 = require("../utils/schoolFeeLedger");
 const schoolFeesRouter = (0, express_1.Router)();
-const scopeMiddleware = [auth_1.auth, orgScope_1.orgScope, requireOrgScope_1.requireOrgScope, roleCheck_1.canAccessOrg];
+const scopeMiddleware = [
+    auth_1.auth,
+    orgScope_1.orgScope,
+    requireOrgScope_1.requireOrgScope,
+    roleCheck_1.canAccessOrg,
+    (0, featureFlag_1.requireFeature)("schoolFees")
+];
 const allowCollect = (req, res, next) => {
     const authReq = req;
     if (authReq.user?.role === "superAdmin") {
@@ -27,6 +36,91 @@ const allowCollect = (req, res, next) => {
     }
     (0, roleCheck_1.isSuperAdminOrOrgStaff)("canCollectFees")(req, res, next);
 };
+const allowManageStudents = (req, res, next) => {
+    const authReq = req;
+    if (authReq.user?.role === "superAdmin" || authReq.user?.role === "orgAdmin") {
+        next();
+        return;
+    }
+    (0, roleCheck_1.isSuperAdminOrOrgStaff)("canManageStudents")(req, res, next);
+};
+schoolFeesRouter.post("/assign/preview", ...scopeMiddleware, allowManageStudents, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    const authReq = req;
+    const orgId = (0, orgFilter_1.getScopedOrganizationId)(authReq, res);
+    const outcome = await (0, schoolFeeAssignmentService_1.previewAssignFeeStructure)(orgId, req.body);
+    if (!outcome.ok) {
+        res.status(outcome.status).json({
+            success: false,
+            data: null,
+            message: outcome.message
+        });
+        return;
+    }
+    res.json({
+        success: true,
+        data: outcome.preview,
+        message: "Fee assignment preview generated successfully"
+    });
+}));
+schoolFeesRouter.post("/assign", ...scopeMiddleware, allowManageStudents, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    const authReq = req;
+    const orgId = (0, orgFilter_1.getScopedOrganizationId)(authReq, res);
+    const outcome = await (0, schoolFeeAssignmentService_1.executeAssignFeeStructure)(orgId, req.body);
+    if (!outcome.ok) {
+        res.status(outcome.status).json({
+            success: false,
+            data: null,
+            message: outcome.message
+        });
+        return;
+    }
+    await (0, cache_1.invalidateOrgSchoolFeesCache)(orgId);
+    res.json({
+        success: true,
+        data: outcome.result,
+        message: `Fees assigned to ${outcome.result.assigned} student(s) successfully`
+    });
+}));
+schoolFeesRouter.post("/payment-intent", ...scopeMiddleware, allowCollect, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    const authReq = req;
+    const orgId = (0, orgFilter_1.getScopedOrganizationId)(authReq, res);
+    const { studentId, academicYear, payments, notes } = req.body;
+    if (!studentId || !academicYear || !Array.isArray(payments) || payments.length === 0) {
+        res.status(400).json({
+            success: false,
+            data: null,
+            message: "studentId, academicYear, and payments[] are required"
+        });
+        return;
+    }
+    const student = await Student_1.Student.findOne({ _id: studentId, ...(0, orgFilter_1.orgFilter)(authReq, res) });
+    if (!student) {
+        res.status(404).json({ success: false, data: null, message: "Student not found" });
+        return;
+    }
+    try {
+        const intent = await (0, schoolFeeCollection_1.createSchoolPaymentIntent)({
+            organizationId: orgId,
+            studentId,
+            academicYear,
+            payments,
+            createdBy: authReq.user.userId,
+            notes
+        });
+        res.status(201).json({
+            success: true,
+            data: intent,
+            message: "Payment intent created"
+        });
+    }
+    catch (error) {
+        res.status(400).json({
+            success: false,
+            data: null,
+            message: error instanceof Error ? error.message : "Invalid payment request"
+        });
+    }
+}));
 schoolFeesRouter.get("/ledger", ...scopeMiddleware, allowCollect, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     const authReq = req;
     const orgId = (0, orgFilter_1.getScopedOrganizationId)(authReq, res);
@@ -48,6 +142,25 @@ schoolFeesRouter.get("/ledger", ...scopeMiddleware, allowCollect, (0, asyncHandl
         success: true,
         data,
         message: "Fee ledger fetched successfully"
+    });
+}));
+schoolFeesRouter.get("/student-fee-status", ...scopeMiddleware, allowCollect, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    const authReq = req;
+    const orgId = (0, orgFilter_1.getScopedOrganizationId)(authReq, res);
+    const { academicYear } = req.query;
+    if (!academicYear) {
+        res.status(400).json({
+            success: false,
+            data: null,
+            message: "academicYear is required"
+        });
+        return;
+    }
+    const statusMap = await (0, schoolFeeService_1.buildStudentFeeStatusMap)(orgId, academicYear);
+    res.json({
+        success: true,
+        data: statusMap,
+        message: "Student fee status fetched successfully"
     });
 }));
 schoolFeesRouter.get("/outstanding", ...scopeMiddleware, allowCollect, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
@@ -145,48 +258,19 @@ schoolFeesRouter.post("/collect", ...scopeMiddleware, allowCollect, schoolFees_1
         res.status(404).json({ success: false, data: null, message: "Student not found" });
         return;
     }
-    const feeHeadPayments = [];
-    let totalAmountDue = 0;
-    let totalAmountPaid = 0;
-    let totalLateFee = 0;
-    const updatedLedgerIds = [];
-    for (const item of payments) {
-        const ledger = await FeeLedger_1.FeeLedger.findOne({
-            organizationId: new mongoose_1.Types.ObjectId(orgId),
-            studentId: new mongoose_1.Types.ObjectId(studentId),
-            academicYear,
-            feeHeadName: item.feeHeadName,
-            periodLabel: item.periodLabel
+    let built;
+    let normalizedPayments;
+    try {
+        normalizedPayments = (0, schoolFeeCollection_1.parseSchoolPaymentLines)(payments);
+        built = await (0, schoolFeeCollection_1.buildSchoolPaymentLines)(orgId, studentId, academicYear, normalizedPayments);
+    }
+    catch (error) {
+        res.status(400).json({
+            success: false,
+            data: null,
+            message: error instanceof Error ? error.message : "Invalid payment request"
         });
-        if (!ledger) {
-            res.status(400).json({
-                success: false,
-                data: null,
-                message: `No ledger entry for ${item.feeHeadName} / ${item.periodLabel}`
-            });
-            return;
-        }
-        const payAmount = item.amountPaid ?? 0;
-        const lateFeeAdd = item.lateFee ?? 0;
-        const newPaid = ledger.amountPaid + payAmount;
-        const newLateFee = ledger.lateFee + lateFeeAdd;
-        const lineStatus = newPaid >= ledger.amountDue + newLateFee ? "paid" : "partial";
-        ledger.amountPaid = newPaid;
-        ledger.lateFee = newLateFee;
-        ledger.status = (0, schoolFeeLedger_1.computeLedgerStatus)(ledger.amountDue, newPaid, ledger.dueDate, newLateFee);
-        await ledger.save();
-        updatedLedgerIds.push(ledger._id);
-        feeHeadPayments.push({
-            feeHeadName: item.feeHeadName,
-            periodLabel: item.periodLabel,
-            amountDue: ledger.amountDue,
-            amountPaid: payAmount,
-            lateFee: lateFeeAdd,
-            status: lineStatus
-        });
-        totalAmountDue += ledger.amountDue;
-        totalAmountPaid += payAmount;
-        totalLateFee += lateFeeAdd;
+        return;
     }
     let receiptNumber = (0, schoolFeeLedger_1.generateReceiptNumber)();
     let attempts = 0;
@@ -203,17 +287,17 @@ schoolFeesRouter.post("/collect", ...scopeMiddleware, allowCollect, schoolFees_1
         paymentMode,
         upiTransactionId,
         collectedBy: authReq.user.userId,
-        feeHeadPayments,
-        totalAmountDue,
-        totalAmountPaid,
-        totalLateFee,
+        feeHeadPayments: built.feeHeadPayments,
+        totalAmountDue: built.totalAmountDue,
+        totalAmountPaid: built.totalAmountPaid,
+        totalLateFee: 0,
         notes
     });
-    await FeeLedger_1.FeeLedger.updateMany({ _id: { $in: updatedLedgerIds } }, { $set: { paymentId: payment._id } });
+    await (0, schoolFeeCollection_1.applySchoolPaymentLinesToLedger)(orgId, studentId, academicYear, normalizedPayments, payment._id);
     const fullPayment = await SchoolFeePayment_1.SchoolFeePayment.findById(payment._id)
         .populate("studentId", "name grade")
         .populate("collectedBy", "name");
-    (0, cache_1.invalidateOrgSchoolFeesCache)(orgId);
+    await (0, cache_1.invalidateOrgSchoolFeesCache)(orgId);
     res.status(201).json({
         success: true,
         data: fullPayment,
@@ -272,8 +356,8 @@ schoolFeesRouter.get("/summary", ...scopeMiddleware, allowCollect, (0, asyncHand
     }
     const orgId = (0, orgFilter_1.getScopedOrganizationId)(authReq, res);
     const monthKey = month ?? "all";
-    const cacheKey = `${orgId}:school-fees:summary:${monthKey}:${academicYear}`;
-    const cached = (0, cache_1.cacheGet)(cacheKey);
+    const cacheKey = (0, cache_1.orgCacheKey)(orgId, `school-fees:summary:${monthKey}:${academicYear}`);
+    const cached = await (0, cache_1.getCached)(cacheKey);
     if (cached) {
         res.json({
             success: true,
@@ -283,7 +367,7 @@ schoolFeesRouter.get("/summary", ...scopeMiddleware, allowCollect, (0, asyncHand
         return;
     }
     const data = await (0, schoolFeeService_1.buildOrgFeeSummary)(orgId, academicYear, month);
-    (0, cache_1.cacheSet)(cacheKey, data, 300);
+    await (0, cache_1.setCached)(cacheKey, data, 300);
     res.json({
         success: true,
         data,

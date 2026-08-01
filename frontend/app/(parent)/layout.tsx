@@ -6,7 +6,7 @@ import { Bus } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { JSX, ReactNode } from "react";
 
-import { logout, getToken, getUser } from "@/lib/auth";
+import { logout, bootstrapSession } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
 const ParentLayout = ({ children }: { children: ReactNode }): JSX.Element => {
@@ -15,13 +15,13 @@ const ParentLayout = ({ children }: { children: ReactNode }): JSX.Element => {
   const [name, setName] = useState("Parent");
 
   useEffect(() => {
-    const token = getToken();
-    const user = getUser();
-    if (!token || user?.role !== "parent") {
-      router.replace("/login");
-      return;
-    }
-    setName(user.name);
+    void bootstrapSession().then((user) => {
+      if (!user || user.role !== "parent") {
+        router.replace("/login");
+        return;
+      }
+      setName(user.name);
+    });
   }, [router]);
 
   const links = [
@@ -69,7 +69,7 @@ const ParentLayout = ({ children }: { children: ReactNode }): JSX.Element => {
             </span>
             <button
               type="button"
-              onClick={logout}
+              onClick={() => void logout()}
               className="text-sm text-gray-500 hover:text-primary"
             >
               Logout

@@ -15,8 +15,11 @@ import { StudentFeeAssignment } from "./models/StudentFeeAssignment";
 import { StudentTransport } from "./models/StudentTransport";
 import { User } from "./models/User";
 import { assignFeeStructureToStudents } from "./utils/schoolFeeLedger";
+import { encryptSecretForStorage, generateBackupCodes } from "./utils/totp";
 
 const ACADEMIC_YEAR = "2025-26";
+/** Base32 secret used for seeded super-admin 2FA in development/E2E. */
+const SEED_SUPER_ADMIN_TOTP_SECRET = "JBSWY3DPEHPK3PXP";
 
 const seed = async (): Promise<void> => {
   await connectDB();
@@ -52,6 +55,7 @@ const seed = async (): Promise<void> => {
   const orgId = demoSchool._id;
 
   console.log("Creating users...");
+  const superAdminBackupCodes = await generateBackupCodes();
   const [superAdmin, orgAdmin, staff, parent] = await User.insertMany([
     {
       name: "Super Admin",
@@ -59,7 +63,11 @@ const seed = async (): Promise<void> => {
       passwordHash: await bcrypt.hash("super123", 10),
       role: "superAdmin",
       organizationId: null,
-      isActive: true
+      isActive: true,
+      twoFactorEnabled: true,
+      twoFactorSecret: encryptSecretForStorage(SEED_SUPER_ADMIN_TOTP_SECRET),
+      twoFactorVerifiedAt: new Date(),
+      backupCodes: superAdminBackupCodes.hashed
     },
     {
       name: "Demo School Admin",

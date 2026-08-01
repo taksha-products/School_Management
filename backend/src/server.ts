@@ -1,13 +1,17 @@
 import compression from "compression";
+import cookieParser from "cookie-parser";
 import cors from "cors";
 import express from "express";
 import rateLimit from "express-rate-limit";
 import mongoSanitize from "express-mongo-sanitize";
 import helmet from "helmet";
 import hpp from "hpp";
+import { createServer } from "http";
 import "dotenv/config";
 
 import { connectDB } from "./config/db";
+import { initRedis } from "./config/redis";
+import { initSocketServer } from "./config/socket";
 import authRouter from "./routes/auth";
 import busesRouter from "./routes/buses";
 import studentsRouter from "./routes/students";
@@ -20,14 +24,24 @@ import parentRouter from "./routes/parent";
 import orgUsersRouter from "./routes/org/users";
 import orgOrganizationRouter from "./routes/org/organization";
 import superAdminOrganizationsRouter from "./routes/superadmin/organizations";
+import superAdminDashboardRouter from "./routes/superadmin/dashboard";
 import superAdminUsersRouter from "./routes/superadmin/users";
 import bulkRouter from "./routes/bulk";
 import transportRouter from "./routes/transport";
+import paymentsRouter, { paymentsWebhookRouter } from "./routes/payments";
+import { gpsRouter, traccarWebhookRouter } from "./routes/gps";
+import { requireFeature } from "./middleware/featureFlag";
+import { auth } from "./middleware/auth";
+import { require2FA } from "./middleware/require2FA";
+import { orgScope } from "./middleware/orgScope";
+import { requireOrgScope } from "./middleware/requireOrgScope";
 import type { AuthenticatedRequest } from "./middleware/auth";
 
 const app = express();
 const port = Number(process.env.PORT) || 5000;
 const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
+
+app.set("trust proxy", 1);
 
 app.use(helmet());
 app.use(compression());
@@ -36,12 +50,21 @@ app.use(
     origin: frontendUrl,
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"]
+    allowedHeaders: ["Content-Type", "Authorization", "x-api-client"]
   })
 );
+app.use(cookieParser());
 app.use(hpp());
-app.use(express.json({ limit: "10kb" }));
-app.use(express.urlencoded({ extended: true, limit: "10kb" }));
+
+// Razorpay webhook requires raw body — must be registered before express.json()
+app.use(
+  "/api/payments/webhook",
+  express.raw({ type: "application/json" }),
+  paymentsWebhookRouter
+);
+
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 // Express 5: sanitize body only (default middleware mutates read-only req.query)
 app.use((req, _res, next) => {
   if (req.body) {
@@ -58,20 +81,14 @@ const apiLimiter = rateLimit({
   legacyHeaders: false
 });
 
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10,
-  message: { success: false, message: "Too many login attempts." }
-});
-
 if (process.env.NODE_ENV === "production") {
-  app.use("/api/auth/login", authLimiter);
   app.use("/api/", apiLimiter);
 }
 
 app.use("/api/auth", authRouter);
-app.use("/api/superadmin/organizations", superAdminOrganizationsRouter);
-app.use("/api/superadmin/users", superAdminUsersRouter);
+app.use("/api/superadmin/organizations", auth, require2FA, superAdminOrganizationsRouter);
+app.use("/api/superadmin/dashboard", auth, require2FA, superAdminDashboardRouter);
+app.use("/api/superadmin/users", auth, require2FA, superAdminUsersRouter);
 app.use("/api/org/users", orgUsersRouter);
 app.use("/api/org/organization", orgOrganizationRouter);
 app.use("/api/buses", busesRouter);
@@ -84,6 +101,16 @@ app.use("/api/expenses", expensesRouter);
 app.use("/api/reports", reportsRouter);
 app.use("/api/bulk", bulkRouter);
 app.use("/api/transport", transportRouter);
+app.use("/api/payments", auth, orgScope, requireOrgScope, paymentsRouter);
+app.use("/api/traccar-webhook", traccarWebhookRouter);
+app.use(
+  "/api/gps",
+  auth,
+  orgScope,
+  requireOrgScope,
+  requireFeature("gpsTracking"),
+  gpsRouter
+);
 
 interface AppError extends Error {
   statusCode?: number;
@@ -142,10 +169,14 @@ app.use(
 
 const startServer = async (): Promise<void> => {
   await connectDB();
-  app.listen(port, () => {
+  await initRedis();
+
+  const httpServer = createServer(app);
+  initSocketServer(httpServer);
+
+  httpServer.listen(port, () => {
     // eslint-disable-next-line no-console
     console.log(`Backend running on port ${port}`);
   });
 };
-
 void startServer();

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Settings, UserCog, UsersRound } from "lucide-react";
+import { Settings, Shield, UserCog, UsersRound } from "lucide-react";
 
 import { PageWrapper } from "@/components/layout/PageWrapper";
 import { Card } from "@/components/ui/Card";
@@ -24,6 +24,12 @@ const cards = [
     description: "School profile, plan, and default academic year for forms across the app.",
     href: "/admin/settings/organization",
     icon: Settings
+  },
+  {
+    title: "Security",
+    description: "Two-factor authentication, backup codes, and account protection.",
+    href: "/admin/settings/security",
+    icon: Shield
   }
 ] as const;
 

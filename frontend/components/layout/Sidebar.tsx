@@ -6,6 +6,7 @@ import { Bus, ChevronDown, LogOut } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
 
 import { useFeesOutstandingBadge } from "@/hooks/useFeesOutstandingBadge";
+import { useOrgFeatures } from "@/hooks/useOrgFeatures";
 import { getUser, logout } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
@@ -140,7 +141,7 @@ const LegacySidebar = ({
           </div>
           <button
             type="button"
-            onClick={logout}
+            onClick={() => void logout()}
             className="mt-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"
           >
             <LogOut className="h-4 w-4" />
@@ -160,6 +161,7 @@ export const Sidebar = ({
 }: SidebarProps): JSX.Element => {
   const pathname = usePathname();
   const outstandingBadge = useFeesOutstandingBadge();
+  const { enabledFeatures } = useOrgFeatures();
   const user = getUser();
   const [collapsed, setCollapsed] = useState(false);
   const [openSection, setOpenSection] = useState<string | null>(null);
@@ -188,9 +190,12 @@ export const Sidebar = ({
     );
   }
 
-  const navContent = useMemo(
-    () =>
-      items.map((item) => {
+  const navContent = useMemo(() => {
+    const visibleItems = items.filter(
+      (item) => !item.featureFlag || enabledFeatures.includes(item.featureFlag)
+    );
+
+    return visibleItems.map((item) => {
         const Icon = adminNavIconMap[item.icon];
         const active = itemIsActive(pathname, item);
         const hasChildren = !!item.children?.length;
@@ -294,9 +299,8 @@ export const Sidebar = ({
             {!collapsed && <span>{item.label}</span>}
           </Link>
         );
-      }),
-    [items, pathname, openSection, collapsed, outstandingBadge, toggleSection]
-  );
+      });
+  }, [items, pathname, openSection, collapsed, outstandingBadge, toggleSection, enabledFeatures]);
 
   return (
     <aside
