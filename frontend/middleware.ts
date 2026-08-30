@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-const protectedPrefixes = ["/admin", "/super", "/staff", "/parent", "/principal"];
+import { getBackendUrl } from "./lib/backendUrl";
 
-const getBackendUrl = (): string =>
-  process.env.BACKEND_URL ?? process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:5000";
+const protectedPrefixes = ["/admin", "/super", "/staff", "/parent", "/principal"];
 
 const appendSetCookies = (target: NextResponse, source: Response): void => {
   if (typeof source.headers.getSetCookie === "function") {
