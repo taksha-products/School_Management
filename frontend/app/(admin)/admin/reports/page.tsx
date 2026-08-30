@@ -2,6 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Fragment, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
@@ -203,7 +204,7 @@ const ReportsPageContent = (): JSX.Element => {
         row.netProfit
       ]);
       downloadCsv(
-        `bustrack_report_${month}.csv`,
+        `taksha_report_${month}.csv`,
         [
           "Bus",
           "Route",
@@ -317,7 +318,14 @@ const ReportsPageContent = (): JSX.Element => {
   }));
 
   return (
-    <PageWrapper title="Financial reports">
+    <PageWrapper
+      title="Financial reports"
+      action={
+        <Link href="/admin/bulk/export">
+          <Button variant="secondary">Export</Button>
+        </Link>
+      }
+    >
       {/* Controls */}
       <Card className="overflow-visible">
         <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-end">

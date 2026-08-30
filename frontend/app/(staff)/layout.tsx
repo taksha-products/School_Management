@@ -7,6 +7,7 @@ import type { JSX, ReactNode } from "react";
 import { Header } from "@/components/layout/Header";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { getStaffNavItems } from "@/components/layout/staffNav";
+import { OrgThemeProvider } from "@/components/OrgThemeProvider";
 import { bootstrapSession } from "@/lib/auth";
 
 const StaffLayout = ({ children }: { children: ReactNode }): JSX.Element => {
@@ -32,13 +33,15 @@ const StaffLayout = ({ children }: { children: ReactNode }): JSX.Element => {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gray-50">
-      <Sidebar legacyItems={getStaffNavItems()} brand="BusTrack Staff" />
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        <Header portalLabel="Staff Portal" />
-        <main className="min-h-0 flex-1 overflow-y-auto bg-gray-50">{children}</main>
+    <OrgThemeProvider>
+      <div className="flex h-screen overflow-hidden bg-gray-50">
+        <Sidebar legacyItems={getStaffNavItems()} whiteLabel roleBadge="Staff" />
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          <Header portalLabel="Staff Portal" />
+          <main className="min-h-0 flex-1 overflow-y-auto bg-gray-50">{children}</main>
+        </div>
       </div>
-    </div>
+    </OrgThemeProvider>
   );
 };
 

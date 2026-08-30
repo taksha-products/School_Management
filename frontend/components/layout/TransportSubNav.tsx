@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 
 const tabs = [
   { label: "Buses", href: "/admin/transport/buses" },
-  { label: "Student registrations", href: "/admin/transport/students" },
+  { label: "Student transport", href: "/admin/transport/students" },
   { label: "Expenses", href: "/admin/transport/expenses" }
 ] as const;
 

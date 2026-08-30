@@ -12,7 +12,8 @@ export const AppProviders = ({ children }: { children: ReactNode }): JSX.Element
       new QueryClient({
         defaultOptions: {
           queries: {
-            refetchOnWindowFocus: false
+            refetchOnWindowFocus: false,
+            staleTime: 30_000
           }
         }
       })

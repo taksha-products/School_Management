@@ -6,16 +6,25 @@ import { Types } from "mongoose";
 import { auth } from "../../middleware/auth";
 import { invalidateOrgFeaturesCache } from "../../middleware/featureFlag";
 import { isSuperAdmin } from "../../middleware/roleCheck";
+import { uploadLogo } from "../../middleware/uploadLogo";
 import {
   ORGANIZATION_FEATURE_KEYS,
   Organization,
-  type OrganizationFeatures
+  type OrganizationFeatures,
+  type OrgGradeEntry
 } from "../../models/Organization";
+import {
+  INSTITUTION_TEMPLATES,
+  type InstitutionType
+} from "../../constants/institutionTemplates";
+import { resolveOrgGradeConfig } from "../../utils/orgGradeConfig";
 import { User } from "../../models/User";
 import { RefreshToken } from "../../models/RefreshToken";
 import { asyncHandler } from "../../utils/asyncHandler";
 import { generateUniqueOrgCode } from "../../utils/orgCode";
 import { paginateArray, parsePaginationQuery } from "../../utils/paginate";
+import { getOrgTheme } from "../../services/orgThemeService";
+import { updateOrganizationBranding } from "../../services/orgBrandingService";
 
 const organizationsRouter = Router();
 
@@ -62,6 +71,87 @@ function validateNewPassword(
   return { ok: true, password };
 }
 
+function sanitizeStringArray(value: unknown): string[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const labels = value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter((item) => item.length > 0);
+  return labels;
+}
+
+function sanitizeGrades(value: unknown): OrgGradeEntry[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const grades: OrgGradeEntry[] = [];
+
+  for (const item of value) {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      return null;
+    }
+
+    const record = item as Record<string, unknown>;
+    const label = typeof record.label === "string" ? record.label.trim() : "";
+    if (!label) {
+      return null;
+    }
+
+    const sections = sanitizeStringArray(record.sections ?? []);
+    if (sections === null) {
+      return null;
+    }
+
+    grades.push({ label, sections });
+  }
+
+  return grades;
+}
+
+function buildOrgConfigUpdate(body: {
+  institutionType?: unknown;
+  grades?: unknown;
+}):
+  | {
+      ok: true;
+      update: {
+        institutionType?: InstitutionType;
+        grades?: OrgGradeEntry[];
+      };
+    }
+  | { ok: false; message: string } {
+  const update: {
+    institutionType?: InstitutionType;
+    grades?: OrgGradeEntry[];
+  } = {};
+
+  if (body.institutionType !== undefined) {
+    if (
+      typeof body.institutionType !== "string" ||
+      !["school", "college", "other"].includes(body.institutionType)
+    ) {
+      return { ok: false, message: "institutionType must be school, college, or other" };
+    }
+    update.institutionType = body.institutionType as InstitutionType;
+  }
+
+  if (body.grades !== undefined) {
+    const grades = sanitizeGrades(body.grades);
+    if (grades === null) {
+      return { ok: false, message: "grades must be an array of { label, sections[] } objects" };
+    }
+    update.grades = grades;
+  }
+
+  if (Object.keys(update).length === 0) {
+    return { ok: false, message: "At least one config field is required" };
+  }
+
+  return { ok: true, update };
+}
+
 organizationsRouter.get(
   "/",
   auth,
@@ -88,6 +178,8 @@ organizationsRouter.get(
           plan: 1,
           isActive: 1,
           features: 1,
+          institutionType: 1,
+          grades: 1,
           studentCount: { $size: "$students" },
           createdAt: 1,
           updatedAt: 1
@@ -163,6 +255,82 @@ organizationsRouter.post(
         }
       },
       message: "Organization created successfully"
+    });
+  })
+);
+
+organizationsRouter.get(
+  "/institution-templates",
+  auth,
+  isSuperAdmin,
+  asyncHandler(async (_req, res) => {
+    res.json({
+      success: true,
+      data: INSTITUTION_TEMPLATES,
+      message: "Institution templates fetched successfully"
+    });
+  })
+);
+
+organizationsRouter.get(
+  "/:id",
+  auth,
+  isSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const orgId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    if (!Types.ObjectId.isValid(orgId)) {
+      res.status(404).json({
+        success: false,
+        data: null,
+        message: "Organization not found"
+      });
+      return;
+    }
+
+    const organizations = await Organization.aggregate([
+      { $match: { _id: new Types.ObjectId(orgId), ...notDeletedFilter } },
+      {
+        $lookup: {
+          from: "students",
+          localField: "_id",
+          foreignField: "organizationId",
+          as: "students"
+        }
+      },
+      {
+        $project: {
+          name: 1,
+          code: 1,
+          address: 1,
+          phone: 1,
+          email: 1,
+          logo: 1,
+          plan: 1,
+          isActive: 1,
+          features: 1,
+          institutionType: 1,
+          grades: 1,
+          studentCount: { $size: "$students" },
+          createdAt: 1,
+          updatedAt: 1
+        }
+      }
+    ]);
+
+    const organization = organizations[0];
+    if (!organization) {
+      res.status(404).json({
+        success: false,
+        data: null,
+        message: "Organization not found"
+      });
+      return;
+    }
+
+    res.json({
+      success: true,
+      data: organization,
+      message: "Organization fetched successfully"
     });
   })
 );
@@ -261,6 +429,48 @@ organizationsRouter.post(
       success: true,
       data: null,
       message: "Organization admin password reset successfully"
+    });
+  })
+);
+
+organizationsRouter.patch(
+  "/:id/config",
+  auth,
+  isSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const parsed = buildOrgConfigUpdate(req.body as Record<string, unknown>);
+
+    if (!parsed.ok) {
+      res.status(400).json({
+        success: false,
+        data: null,
+        message: parsed.message
+      });
+      return;
+    }
+
+    const organization = await Organization.findByIdAndUpdate(req.params.id, parsed.update, {
+      new: true,
+      runValidators: true
+    }).select("institutionType grades name");
+
+    if (!organization) {
+      res.status(404).json({
+        success: false,
+        data: null,
+        message: "Organization not found"
+      });
+      return;
+    }
+
+    res.json({
+      success: true,
+      data: {
+        ...resolveOrgGradeConfig(organization),
+        _id: organization._id,
+        name: organization.name
+      },
+      message: "Organization config updated successfully"
     });
   })
 );
@@ -414,6 +624,92 @@ organizationsRouter.put(
       success: true,
       data: organization,
       message: `Organization ${isActive ? "activated" : "deactivated"} successfully`
+    });
+  })
+);
+
+organizationsRouter.get(
+  "/:id/branding",
+  auth,
+  isSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const orgId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    if (!Types.ObjectId.isValid(orgId)) {
+      res.status(404).json({
+        success: false,
+        data: null,
+        message: "Organization not found"
+      });
+      return;
+    }
+
+    const theme = await getOrgTheme(orgId);
+    if (!theme) {
+      res.status(404).json({
+        success: false,
+        data: null,
+        message: "Organization not found"
+      });
+      return;
+    }
+
+    res.json({
+      success: true,
+      data: theme,
+      message: "Branding fetched successfully"
+    });
+  })
+);
+
+organizationsRouter.post(
+  "/:id/branding",
+  auth,
+  isSuperAdmin,
+  (req, res, next) => {
+    uploadLogo(req, res, (error) => {
+      if (error instanceof Error) {
+        res.status(400).json({
+          success: false,
+          data: null,
+          message: error.message
+        });
+        return;
+      }
+      next();
+    });
+  },
+  asyncHandler(async (req, res) => {
+    const orgId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    if (!Types.ObjectId.isValid(orgId)) {
+      res.status(404).json({
+        success: false,
+        data: null,
+        message: "Organization not found"
+      });
+      return;
+    }
+
+    const result = await updateOrganizationBranding(
+      orgId,
+      req.body as { brandColor?: string; displayName?: string },
+      req.file
+        ? { buffer: req.file.buffer, mimetype: req.file.mimetype }
+        : undefined
+    );
+
+    if (!result.ok) {
+      res.status(result.status).json({
+        success: false,
+        data: null,
+        message: result.message
+      });
+      return;
+    }
+
+    res.json({
+      success: true,
+      data: result.theme,
+      message: "Branding updated successfully"
     });
   })
 );

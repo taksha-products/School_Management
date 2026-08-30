@@ -4,6 +4,7 @@ export interface BulkStudentPreviewRow {
   row: number;
   name: string;
   grade: string;
+  section?: string;
   parentName: string;
   parentPhone: string;
   address?: string;

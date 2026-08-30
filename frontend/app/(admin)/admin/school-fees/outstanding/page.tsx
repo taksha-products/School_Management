@@ -10,7 +10,8 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { TableSkeleton } from "@/components/ui/TableSkeleton";
 import { useToast } from "@/components/ui/Toast";
-import { ACADEMIC_YEAR, GRADE_OPTIONS } from "@/lib/constants";
+import { ACADEMIC_YEAR } from "@/lib/constants";
+import { useOrgConfig } from "@/hooks/useOrgConfig";
 import { api } from "@/lib/api";
 import { downloadFromApi } from "@/lib/fileDownload";
 import { formatINR } from "@/lib/utils";
@@ -19,6 +20,7 @@ import type { OutstandingStudent } from "@/types/schoolFees";
 
 const OutstandingPage = (): JSX.Element => {
   const { showToast } = useToast();
+  const { gradeFilterOptions } = useOrgConfig();
   const [grade, setGrade] = useState("");
   const [feeHeadName, setFeeHeadName] = useState("");
   const [academicYear, setAcademicYear] = useState(ACADEMIC_YEAR);
@@ -64,7 +66,7 @@ const OutstandingPage = (): JSX.Element => {
       setIsExporting(true);
       await downloadFromApi(
         "/api/bulk/export/school-fees-outstanding",
-        `bustrack_school_fees_outstanding_${new Date().toISOString().slice(0, 10)}.xlsx`,
+        `taksha_school_fees_outstanding_${new Date().toISOString().slice(0, 10)}.xlsx`,
         {
           grade: grade || undefined,
           academicYear
@@ -79,7 +81,19 @@ const OutstandingPage = (): JSX.Element => {
   };
 
   return (
-    <PageWrapper title="Outstanding School Fees">
+    <PageWrapper
+      title="Outstanding School Fees"
+      action={
+        <div className="flex flex-wrap gap-2">
+          <Link href="/admin/bulk/fee-collection">
+            <Button variant="secondary">Bulk collect</Button>
+          </Link>
+          <Link href="/admin/fees/collect">
+            <Button>Collect fees</Button>
+          </Link>
+        </div>
+      }
+    >
       <Card className="mb-4">
         <p className="text-sm text-slate-600">
           Total outstanding:{" "}
@@ -96,9 +110,9 @@ const OutstandingPage = (): JSX.Element => {
             onChange={(e) => setGrade(e.target.value === "All" ? "" : e.target.value)}
             className="rounded border px-3 py-2 text-sm"
           >
-            {GRADE_OPTIONS.map((g) => (
+            {gradeFilterOptions.map((g) => (
               <option key={g} value={g === "All" ? "" : g}>
-                Grade {g}
+                {g === "All" ? "All grades" : g}
               </option>
             ))}
           </select>
@@ -131,7 +145,6 @@ const OutstandingPage = (): JSX.Element => {
                   <th>Total Due</th>
                   <th>Total Paid</th>
                   <th>Balance</th>
-                  <th>Overdue</th>
                   <th>Action</th>
                 </tr>
               </thead>
@@ -143,13 +156,15 @@ const OutstandingPage = (): JSX.Element => {
                     <td>{formatINR(row.totalDue)}</td>
                     <td>{formatINR(row.totalPaid)}</td>
                     <td className="font-semibold text-rose-600">{formatINR(row.balance)}</td>
-                    <td>{formatINR(row.overdueAmount)}</td>
                     <td>
-                      <Link
-                        href={`/admin/fees?studentId=${row.studentId}`}
-                        className="text-amber-600 hover:underline"
-                      >
-                        Collect
+                      <Link href={`/admin/fees/collect?studentId=${row.studentId}`}>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="border-primary text-primary hover:bg-primary-50"
+                        >
+                          Collect
+                        </Button>
                       </Link>
                     </td>
                   </tr>

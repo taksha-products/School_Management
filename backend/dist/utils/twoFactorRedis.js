@@ -5,8 +5,8 @@ const redis_1 = require("../config/redis");
 const ATTEMPT_WINDOW_SECONDS = 10 * 60;
 const MAX_ATTEMPTS = 5;
 const PENDING_SETUP_TTL_SECONDS = 10 * 60;
-const attemptsKey = (userId) => `bustrack:2fa:attempts:${userId}`;
-const pendingKey = (userId) => `bustrack:2fa:pending:${userId}`;
+const attemptsKey = (userId) => `taksha:2fa:attempts:${userId}`;
+const pendingKey = (userId) => `taksha:2fa:pending:${userId}`;
 /**
  * Increments 2FA verification attempts and returns whether the limit is exceeded.
  */

@@ -77,7 +77,7 @@ export const TransportFeesView = (): JSX.Element => {
       setIsExporting(true);
       await downloadFromApi(
         "/api/bulk/export/fees",
-        `bustrack_fees_${new Date().toISOString().slice(0, 10)}.xlsx`,
+        `taksha_fees_${new Date().toISOString().slice(0, 10)}.xlsx`,
         { month, busId: busId || undefined }
       );
       showToast("success", "Fees export downloaded");

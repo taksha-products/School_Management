@@ -7,8 +7,14 @@
 @tailwind utilities;
 
 :root {
-  --color-primary: #fd6d00;
-  --color-primary-hover: #e56200;
+  --brand-color: #F97316;
+  --brand-color-hover: #ea580c;
+  --brand-color-50: #fff7ed;
+  --brand-color-100: #ffedd5;
+  --brand-color-200: #fed7aa;
+
+  --color-primary: var(--brand-color);
+  --color-primary-hover: var(--brand-color-hover);
   --color-secondary: #fe9b30;
   --color-tertiary: #febb71;
   --color-light: #fee3c7;
@@ -27,7 +33,7 @@
 
   --color-border: #e5e7eb;
   --color-border-input: #d1d5db;
-  --color-border-focus: #fd6d00;
+  --color-border-focus: var(--brand-color);
 
   --color-success: #16a34a;
   --color-success-bg: #dcfce7;
@@ -75,7 +81,7 @@ body {
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #fd6d00;
+  background: var(--brand-color);
 }
 
 @layer components {

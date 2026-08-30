@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
-import { AlertTriangle, IndianRupee, TrendingUp, Users } from "lucide-react";
+import { AlertTriangle, IndianRupee, Percent, Users } from "lucide-react";
 import {
   Area,
   CartesianGrid,
@@ -122,25 +122,19 @@ const AdminDashboardPage = (): JSX.Element => {
   const sixMonthTrendQuery = useQuery({
     queryKey: ["dashboard-6m-trend", trendMonths.join(","), ACADEMIC_YEAR],
     queryFn: async () => {
-      const results = await Promise.all(
-        trendMonths.map(async (m) => {
-          const res = await api.get<{ data: MonthlyReport[] }>("/api/reports/monthly", {
-            params: { month: m, academicYear: ACADEMIC_YEAR }
-          });
-          const rows = res.data.data;
-          const collected = rows.reduce((s, r) => s + r.totalFeesCollected, 0);
-          const expenses = rows.reduce((s, r) => s + r.totalExpenses, 0);
-          return {
-            monthKey: m,
-            label: new Date(`${m}-01T12:00:00`).toLocaleDateString("en-IN", {
-              month: "short"
-            }),
-            collected,
-            expenses
-          };
-        })
-      );
-      return results;
+      const res = await api.get<{
+        data: Array<{ month: string; totalFeesCollected: number; totalExpenses: number }>;
+      }>("/api/reports/monthly-trend", {
+        params: { months: trendMonths.join(","), academicYear: ACADEMIC_YEAR }
+      });
+      return res.data.data.map((point) => ({
+        monthKey: point.month,
+        label: new Date(`${point.month}-01T12:00:00`).toLocaleDateString("en-IN", {
+          month: "short"
+        }),
+        collected: point.totalFeesCollected,
+        expenses: point.totalExpenses
+      }));
     }
   });
 
@@ -236,7 +230,6 @@ const AdminDashboardPage = (): JSX.Element => {
   const totalSchoolStudents =
     summaryQuery.data?.totalSchoolStudents ?? summaryQuery.data?.totalStudents ?? 0;
   const onBusStudents = summaryQuery.data?.onBusStudents ?? 0;
-  const netProfit = summaryQuery.data?.netProfit ?? 0;
 
   const studentInitials = (name: string): string =>
     name
@@ -301,22 +294,14 @@ const AdminDashboardPage = (): JSX.Element => {
           />
 
           <KpiStatCard
-            label="Net profit this month"
-            icon={TrendingUp}
+            label="Collection rate"
+            icon={Percent}
             value={
-              <span
-                className={cn(
-                  netProfit > 0
-                    ? "text-green-600"
-                    : netProfit < 0
-                      ? "text-red-600"
-                      : "text-gray-500"
-                )}
-              >
-                {formatINR(netProfit)}
+              <span className={pctColor(collectionPct)}>
+                {collectionPct}% collected
               </span>
             }
-            sub="Income minus expenses"
+            sub={`${formatINR(totalCollected)} of ${formatINR(totalFeesDue)} due this month`}
           />
         </div>
       )}

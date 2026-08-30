@@ -11,6 +11,7 @@ import { StudentTransport } from "../models/StudentTransport";
 import { asyncHandler } from "../utils/asyncHandler";
 import { getCached, orgCacheKey, setCached } from "../utils/cache";
 import { getScopedOrganizationId } from "../utils/orgFilter";
+import { buildMonthlyBusReports, buildMonthlyTrend } from "../services/reportService";
 
 const reportsRouter = Router();
 
@@ -60,130 +61,71 @@ reportsRouter.get(
     }
 
     const orgId = new Types.ObjectId(orgIdStr);
-    const start = new Date(`${monthKey}-01T00:00:00.000Z`);
-    const end = new Date(start);
-    end.setUTCMonth(end.getUTCMonth() + 1);
-
-    const summary = await Bus.aggregate([
-      { $match: { organizationId: orgId } },
-      {
-        $lookup: {
-          from: "studenttransports",
-          let: { busId: "$_id", orgId: "$organizationId" },
-          pipeline: [
-            {
-              $match: {
-                $expr: {
-                  $and: [
-                    { $eq: ["$busId", "$$busId"] },
-                    { $eq: ["$organizationId", "$$orgId"] },
-                    { $eq: ["$status", "active"] },
-                    { $eq: ["$academicYear", academicYear] }
-                  ]
-                }
-              }
-            },
-            { $project: { _id: 1, monthlyTransportFee: 1 } }
-          ],
-          as: "students"
-        }
-      },
-      {
-        $lookup: {
-          from: "feepayments",
-          let: { busId: "$_id", orgId: "$organizationId" },
-          pipeline: [
-            {
-              $match: {
-                $expr: {
-                  $and: [
-                    { $eq: ["$busId", "$$busId"] },
-                    { $eq: ["$organizationId", "$$orgId"] },
-                    { $eq: ["$month", monthKey] },
-                    { $eq: ["$academicYear", academicYear] }
-                  ]
-                }
-              }
-            }
-          ],
-          as: "payments"
-        }
-      },
-      {
-        $lookup: {
-          from: "expenses",
-          let: { busId: "$_id", orgId: "$organizationId" },
-          pipeline: [
-            {
-              $match: {
-                $expr: {
-                  $and: [
-                    { $eq: ["$busId", "$$busId"] },
-                    { $eq: ["$organizationId", "$$orgId"] },
-                    { $eq: ["$academicYear", academicYear] },
-                    { $gte: ["$date", start] },
-                    { $lt: ["$date", end] },
-                    { $ne: ["$deleted", true] }
-                  ]
-                }
-              }
-            }
-          ],
-          as: "expenses"
-        }
-      },
-      {
-        $addFields: {
-          totalFeesDue: { $sum: "$students.monthlyTransportFee" },
-          transportStudentCount: { $size: "$students" },
-          totalFeesCollected: {
-            $sum: {
-              $map: {
-                input: {
-                  $filter: {
-                    input: "$payments",
-                    as: "payment",
-                    cond: { $in: ["$$payment.status", ["paid", "partial"]] }
-                  }
-                },
-                as: "payment",
-                in: "$$payment.amountPaid"
-              }
-            }
-          },
-          pendingCount: {
-            $size: {
-              $filter: {
-                input: "$payments",
-                as: "payment",
-                cond: { $in: ["$$payment.status", ["pending", "overdue"]] }
-              }
-            }
-          },
-          totalExpenses: { $sum: "$expenses.amount" },
-          studentCount: { $size: "$students" }
-        }
-      },
-      {
-        $project: {
-          _id: 0,
-          busId: "$_id",
-          busNumber: 1,
-          routeName: 1,
-          totalFeesDue: 1,
-          totalFeesCollected: 1,
-          pendingCount: 1,
-          totalExpenses: 1,
-          netProfit: { $subtract: ["$totalFeesCollected", "$totalExpenses"] },
-          studentCount: 1,
-          transportStudentCount: 1
-        }
-      },
-      { $sort: { busNumber: 1 } }
-    ]);
+    const summary = await buildMonthlyBusReports(orgId, monthKey, academicYear);
 
     await setCached(cacheKey, summary, 300);
     res.json({ success: true, data: summary, message: "Monthly report fetched successfully" });
+  })
+);
+
+reportsRouter.get(
+  "/monthly-trend",
+  ...scopeMiddleware,
+  allowReportRead,
+  asyncHandler(async (req, res) => {
+    const authReq = req as AuthenticatedRequest;
+    const { months, academicYear } = req.query as {
+      months?: string;
+      academicYear?: string;
+    };
+
+    if (!months || !academicYear) {
+      res.status(400).json({
+        success: false,
+        data: null,
+        message: "months and academicYear are required"
+      });
+      return;
+    }
+
+    const monthKeys = months
+      .split(",")
+      .map((month) => month.trim())
+      .filter((month) => /^\d{4}-\d{2}$/.test(month));
+
+    if (monthKeys.length === 0 || monthKeys.length > 12) {
+      res.status(400).json({
+        success: false,
+        data: null,
+        message: "Provide 1–12 months in YYYY-MM format"
+      });
+      return;
+    }
+
+    const orgIdStr = getScopedOrganizationId(authReq, res)!;
+    const cacheKey = orgCacheKey(
+      orgIdStr,
+      `reports:monthly-trend:${monthKeys.join(",")}:${academicYear}`
+    );
+    const cached = await getCached<Awaited<ReturnType<typeof buildMonthlyTrend>>>(cacheKey);
+    if (cached) {
+      res.json({
+        success: true,
+        data: cached,
+        message: "Monthly trend fetched successfully"
+      });
+      return;
+    }
+
+    const orgId = new Types.ObjectId(orgIdStr);
+    const data = await buildMonthlyTrend(orgId, monthKeys, academicYear);
+
+    await setCached(cacheKey, data, 300);
+    res.json({
+      success: true,
+      data,
+      message: "Monthly trend fetched successfully"
+    });
   })
 );
 

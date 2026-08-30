@@ -14,7 +14,7 @@ const LiveMapClient = dynamic(() => import("@/components/gps/LiveMapClient").the
 const LiveGpsPage = (): JSX.Element => (
   <div className="flex h-full flex-col gap-4 p-4">
     <div className="flex items-center justify-between">
-      <h1 className="text-2xl font-bold text-slate-900">Live Bus Tracking</h1>
+      <h1 className="text-2xl font-bold text-slate-900">Live Tracking</h1>
     </div>
     <LiveMapClient />
   </div>

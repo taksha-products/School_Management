@@ -10,7 +10,7 @@ interface ModalProps {
   children: ReactNode;
   onClose: () => void;
   footer?: ReactNode;
-  size?: "default" | "large";
+  size?: "default" | "large" | "xl";
 }
 
 export const Modal = ({
@@ -34,7 +34,11 @@ export const Modal = ({
       <div
         className={cn(
           "w-full rounded-2xl bg-white p-6 text-gray-900 shadow-[0_20px_60px_rgb(0_0_0/0.15)]",
-          size === "large" ? "max-w-[600px]" : "max-w-[480px]"
+          size === "xl"
+            ? "max-w-4xl"
+            : size === "large"
+              ? "max-w-[600px]"
+              : "max-w-[480px]"
         )}
         onClick={(e) => e.stopPropagation()}
         role="dialog"

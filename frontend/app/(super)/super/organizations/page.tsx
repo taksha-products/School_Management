@@ -2,11 +2,11 @@
 
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Copy } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { ListPagination } from "@/components/shared/ListPagination";
 import { PageWrapper } from "@/components/layout/PageWrapper";
-import { EditFeaturesModal } from "@/components/superadmin/EditFeaturesModal";
 import { DeleteOrganizationModal } from "@/components/superadmin/DeleteOrganizationModal";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -17,10 +17,10 @@ import type { PaginatedResponse } from "@/types/pagination";
 import type { Organization } from "@/types/schoolFees";
 
 const OrganizationsPage = (): JSX.Element => {
+  const router = useRouter();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const [open, setOpen] = useState(false);
-  const [featuresOrg, setFeaturesOrg] = useState<Organization | null>(null);
   const [deleteOrg, setDeleteOrg] = useState<Organization | null>(null);
   const [creds, setCreds] = useState<{ email: string; temporaryPassword: string } | null>(null);
   const [page, setPage] = useState(1);
@@ -98,7 +98,7 @@ const OrganizationsPage = (): JSX.Element => {
               <tr
                 key={org._id}
                 className="cursor-pointer border-t border-slate-100 transition-colors hover:bg-slate-50"
-                onClick={() => setFeaturesOrg(org)}
+                onClick={() => router.push(`/super/organizations/${org._id}`)}
               >
                 <td className="p-2 font-medium">{org.name}</td>
                 <td>{org.code}</td>
@@ -153,13 +153,6 @@ const OrganizationsPage = (): JSX.Element => {
           </Button>
         </div>
       </Modal>
-
-      <EditFeaturesModal
-        organization={featuresOrg}
-        isOpen={!!featuresOrg}
-        onClose={() => setFeaturesOrg(null)}
-        onSaved={() => queryClient.invalidateQueries({ queryKey: ["super-orgs"] })}
-      />
 
       <DeleteOrganizationModal
         organization={deleteOrg}

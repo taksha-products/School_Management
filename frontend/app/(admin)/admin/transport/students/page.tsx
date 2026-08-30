@@ -41,7 +41,14 @@ const TransportStudentsPage = (): JSX.Element => {
   });
 
   return (
-    <PageWrapper title="Transport">
+    <PageWrapper
+      title="Transport"
+      action={
+        <Link href="/admin/bulk/assign-buses">
+          <Button variant="secondary">Bulk assign</Button>
+        </Link>
+      }
+    >
       <TransportSubNav />
       <Card>
         <div className="mb-3 grid gap-2 md:grid-cols-2">
@@ -129,7 +136,7 @@ const TransportStudentsPage = (): JSX.Element => {
           <Link href="/admin/students" className="text-amber-600 hover:underline">
             Students
           </Link>{" "}
-          and use Manage Transport.
+          and use Transport.
         </p>
       </Card>
 

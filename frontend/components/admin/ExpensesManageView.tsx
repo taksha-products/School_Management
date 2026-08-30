@@ -9,6 +9,7 @@ import { z } from "zod";
 import { ListPagination } from "@/components/shared/ListPagination";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { Modal } from "@/components/ui/Modal";
 import { TableSkeleton } from "@/components/ui/TableSkeleton";
 import { useToast } from "@/components/ui/Toast";
 import { api } from "@/lib/api";
@@ -27,6 +28,16 @@ const expenseSchema = z.object({
 });
 type ExpenseForm = z.infer<typeof expenseSchema>;
 
+const defaultFormValues: ExpenseForm = {
+  busId: "",
+  category: "diesel",
+  amount: 0,
+  date: new Date().toISOString().slice(0, 10),
+  vendor: "",
+  notes: "",
+  academicYear: "2025-26"
+};
+
 export const ExpensesManageView = (): JSX.Element => {
   const { showToast } = useToast();
   const queryClient = useQueryClient();
@@ -35,6 +46,7 @@ export const ExpensesManageView = (): JSX.Element => {
   const [category, setCategory] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
+  const [formOpen, setFormOpen] = useState(false);
 
   useEffect(() => {
     setPage(1);
@@ -42,13 +54,14 @@ export const ExpensesManageView = (): JSX.Element => {
 
   const form = useForm<ExpenseForm>({
     resolver: zodResolver(expenseSchema),
-    defaultValues: { category: "diesel", academicYear: "2025-26", date: new Date().toISOString().slice(0, 10) }
+    defaultValues: defaultFormValues
   });
 
   const busesQuery = useQuery({
     queryKey: ["buses-expense"],
     queryFn: async () => (await api.get<{ data: Bus[] }>("/api/buses")).data.data
   });
+
   const expensesQuery = useQuery({
     queryKey: ["expenses", { page, busId, month, category }],
     queryFn: async () =>
@@ -66,8 +79,21 @@ export const ExpensesManageView = (): JSX.Element => {
       ).data,
     placeholderData: keepPreviousData
   });
+
   const expenseRows = expensesQuery.data?.data ?? [];
   const pagination = expensesQuery.data?.pagination;
+
+  const closeForm = (): void => {
+    setFormOpen(false);
+    setEditingId(null);
+    form.reset(defaultFormValues);
+  };
+
+  const openCreateForm = (): void => {
+    setEditingId(null);
+    form.reset(defaultFormValues);
+    setFormOpen(true);
+  };
 
   const saveMutation = useMutation({
     mutationFn: async (payload: ExpenseForm) => {
@@ -78,12 +104,12 @@ export const ExpensesManageView = (): JSX.Element => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["expenses"] });
-      setEditingId(null);
-      form.reset({ category: "diesel", academicYear: "2025-26", date: new Date().toISOString().slice(0, 10) });
+      closeForm();
       showToast("success", "Expense saved");
     },
     onError: () => showToast("error", "Failed to save expense")
   });
+
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => api.delete(`/api/expenses/${id}`),
     onSuccess: () => {
@@ -99,31 +125,11 @@ export const ExpensesManageView = (): JSX.Element => {
   );
 
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      <Card title="Log New Expense">
-        <form className="grid gap-3" onSubmit={form.handleSubmit((values) => saveMutation.mutate(values))}>
-          <select {...form.register("busId")} className="rounded border px-3 py-2">
-            <option value="">Select Bus</option>
-            {(busesQuery.data ?? []).map((bus) => (
-              <option key={bus._id} value={bus._id}>
-                {bus.busNumber}
-              </option>
-            ))}
-          </select>
-          <p className="text-xs text-rose-500">{form.formState.errors.busId?.message}</p>
-          <select {...form.register("category")} className="rounded border px-3 py-2">
-            <option value="diesel">diesel</option>
-            <option value="maintenance">maintenance</option>
-            <option value="other">other</option>
-          </select>
-          <input type="number" {...form.register("amount")} placeholder="Amount" className="rounded border px-3 py-2" />
-          <input type="date" {...form.register("date")} className="rounded border px-3 py-2" />
-          <input {...form.register("vendor")} placeholder="Vendor" className="rounded border px-3 py-2" />
-          <textarea {...form.register("notes")} placeholder="Notes" className="rounded border px-3 py-2" />
-          <input {...form.register("academicYear")} placeholder="Academic Year" className="rounded border px-3 py-2" />
-          <Button type="submit">{editingId ? "Update Expense" : "Add Expense"}</Button>
-        </form>
-      </Card>
+    <>
+      <div className="mb-4 flex justify-end">
+        <Button onClick={openCreateForm}>Add Expense</Button>
+      </div>
+
       <Card title="Expense List">
         <div className="mb-3 grid gap-2 md:grid-cols-3">
           <select value={busId} onChange={(e) => setBusId(e.target.value)} className="rounded border px-3 py-2">
@@ -134,13 +140,22 @@ export const ExpensesManageView = (): JSX.Element => {
               </option>
             ))}
           </select>
-          <select value={category} onChange={(e) => setCategory(e.target.value)} className="rounded border px-3 py-2">
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            className="rounded border px-3 py-2"
+          >
             <option value="">All Categories</option>
             <option value="diesel">diesel</option>
             <option value="maintenance">maintenance</option>
             <option value="other">other</option>
           </select>
-          <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="rounded border px-3 py-2" />
+          <input
+            type="month"
+            value={month}
+            onChange={(e) => setMonth(e.target.value)}
+            className="rounded border px-3 py-2"
+          />
         </div>
         {expensesQuery.isLoading ? (
           <TableSkeleton />
@@ -178,7 +193,10 @@ export const ExpensesManageView = (): JSX.Element => {
                           onClick={() => {
                             setEditingId(expense._id);
                             form.reset({
-                              busId: typeof expense.busId === "string" ? expense.busId : expense.busId._id,
+                              busId:
+                                typeof expense.busId === "string"
+                                  ? expense.busId
+                                  : expense.busId._id,
                               category: expense.category,
                               amount: expense.amount,
                               date: expense.date.slice(0, 10),
@@ -186,6 +204,7 @@ export const ExpensesManageView = (): JSX.Element => {
                               notes: expense.notes ?? "",
                               academicYear: expense.academicYear
                             });
+                            setFormOpen(true);
                           }}
                         >
                           Edit
@@ -206,6 +225,56 @@ export const ExpensesManageView = (): JSX.Element => {
           </>
         )}
       </Card>
-    </div>
+
+      <Modal
+        isOpen={formOpen}
+        title={editingId ? "Edit Expense" : "Add Expense"}
+        onClose={closeForm}
+        footer={
+          <>
+            <Button variant="secondary" onClick={closeForm}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => void form.handleSubmit((values) => saveMutation.mutate(values))()}
+              disabled={saveMutation.isPending}
+            >
+              {saveMutation.isPending ? "Saving..." : editingId ? "Update Expense" : "Add Expense"}
+            </Button>
+          </>
+        }
+      >
+        <form className="grid gap-3" onSubmit={form.handleSubmit((values) => saveMutation.mutate(values))}>
+          <select {...form.register("busId")} className="rounded border px-3 py-2">
+            <option value="">Select Bus</option>
+            {(busesQuery.data ?? []).map((bus) => (
+              <option key={bus._id} value={bus._id}>
+                {bus.busNumber}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-rose-500">{form.formState.errors.busId?.message}</p>
+          <select {...form.register("category")} className="rounded border px-3 py-2">
+            <option value="diesel">diesel</option>
+            <option value="maintenance">maintenance</option>
+            <option value="other">other</option>
+          </select>
+          <input
+            type="number"
+            {...form.register("amount")}
+            placeholder="Amount"
+            className="rounded border px-3 py-2"
+          />
+          <input type="date" {...form.register("date")} className="rounded border px-3 py-2" />
+          <input {...form.register("vendor")} placeholder="Vendor" className="rounded border px-3 py-2" />
+          <textarea {...form.register("notes")} placeholder="Notes" className="rounded border px-3 py-2" />
+          <input
+            {...form.register("academicYear")}
+            placeholder="Academic Year"
+            className="rounded border px-3 py-2"
+          />
+        </form>
+      </Modal>
+    </>
   );
 };

@@ -21,6 +21,7 @@ export interface FeeStructure {
 }
 
 import type { OrganizationFeatures } from "@/types/organization";
+import type { InstitutionType, OrgGradeEntry } from "@/types/orgConfig";
 
 export interface Organization {
   _id: string;
@@ -33,7 +34,10 @@ export interface Organization {
   isActive: boolean;
   studentCount?: number;
   features?: OrganizationFeatures;
+  institutionType?: InstitutionType;
+  grades?: OrgGradeEntry[];
   createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface OrgUser {

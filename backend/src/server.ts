@@ -23,6 +23,7 @@ import schoolFeesRouter from "./routes/school-fees";
 import parentRouter from "./routes/parent";
 import orgUsersRouter from "./routes/org/users";
 import orgOrganizationRouter from "./routes/org/organization";
+import organizationsRouter from "./routes/organizations";
 import superAdminOrganizationsRouter from "./routes/superadmin/organizations";
 import superAdminDashboardRouter from "./routes/superadmin/dashboard";
 import superAdminUsersRouter from "./routes/superadmin/users";
@@ -31,11 +32,15 @@ import transportRouter from "./routes/transport";
 import paymentsRouter, { paymentsWebhookRouter } from "./routes/payments";
 import { gpsRouter, traccarWebhookRouter } from "./routes/gps";
 import { requireFeature } from "./middleware/featureFlag";
-import { auth } from "./middleware/auth";
+import { auth, type AuthenticatedRequest } from "./middleware/auth";
 import { require2FA } from "./middleware/require2FA";
 import { orgScope } from "./middleware/orgScope";
 import { requireOrgScope } from "./middleware/requireOrgScope";
-import type { AuthenticatedRequest } from "./middleware/auth";
+import path from "path";
+
+import { ensureLogosDir } from "./utils/logoStorage";
+import orgThemeRouter from "./routes/org/theme";
+import adminBrandingRouter from "./routes/admin/branding";
 
 const app = express();
 const port = Number(process.env.PORT) || 5000;
@@ -85,12 +90,18 @@ if (process.env.NODE_ENV === "production") {
   app.use("/api/", apiLimiter);
 }
 
+ensureLogosDir();
+app.use("/logos", express.static(path.join(process.cwd(), "public", "logos")));
+
 app.use("/api/auth", authRouter);
+app.use("/api/org/theme", orgThemeRouter);
+app.use("/api/admin/settings/branding", adminBrandingRouter);
 app.use("/api/superadmin/organizations", auth, require2FA, superAdminOrganizationsRouter);
 app.use("/api/superadmin/dashboard", auth, require2FA, superAdminDashboardRouter);
 app.use("/api/superadmin/users", auth, require2FA, superAdminUsersRouter);
 app.use("/api/org/users", orgUsersRouter);
 app.use("/api/org/organization", orgOrganizationRouter);
+app.use("/api/organizations", organizationsRouter);
 app.use("/api/buses", busesRouter);
 app.use("/api/students", studentsRouter);
 app.use("/api/fees", feesRouter);

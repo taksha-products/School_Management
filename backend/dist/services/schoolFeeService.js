@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.buildOrgFeeSummary = exports.buildReceiptView = exports.buildStudentFeeLedgerView = exports.formatStudentFeeStatusLabel = exports.buildStudentFeeStatusMapsByYear = exports.buildStudentFeeStatusMap = void 0;
+exports.buildOrgFeeSummary = exports.buildReceiptView = exports.buildStudentFeeLedgerView = exports.formatStudentFeeStatusLabel = exports.buildStudentFeeStatusMapsByYear = exports.buildStudentFeeStatusMapForStudents = exports.buildStudentFeeStatusMap = void 0;
 const mongoose_1 = require("mongoose");
 const FeeLedger_1 = require("../models/FeeLedger");
 const SchoolFeePayment_1 = require("../models/SchoolFeePayment");
@@ -53,6 +53,62 @@ const buildStudentFeeStatusMap = async (organizationId, academicYear) => {
     return statusMap;
 };
 exports.buildStudentFeeStatusMap = buildStudentFeeStatusMap;
+const buildStudentFeeStatusMapForStudents = async (organizationId, academicYear, studentIds) => {
+    if (studentIds.length === 0) {
+        return {};
+    }
+    const organizationObjectId = new mongoose_1.Types.ObjectId(organizationId);
+    const uniqueStudentIds = [...new Set(studentIds.filter((id) => mongoose_1.Types.ObjectId.isValid(id)))];
+    if (uniqueStudentIds.length === 0) {
+        return {};
+    }
+    const studentObjectIds = uniqueStudentIds.map((id) => new mongoose_1.Types.ObjectId(id));
+    const [assignments, balanceRows] = await Promise.all([
+        StudentFeeAssignment_1.StudentFeeAssignment.find({
+            organizationId: organizationObjectId,
+            academicYear,
+            isActive: true,
+            studentId: { $in: studentObjectIds }
+        }).select("studentId"),
+        FeeLedger_1.FeeLedger.aggregate([
+            {
+                $match: {
+                    organizationId: organizationObjectId,
+                    academicYear,
+                    studentId: { $in: studentObjectIds }
+                }
+            },
+            {
+                $group: {
+                    _id: "$studentId",
+                    balance: {
+                        $sum: {
+                            $max: [
+                                0,
+                                { $subtract: [{ $add: ["$amountDue", "$lateFee"] }, "$amountPaid"] }
+                            ]
+                        }
+                    }
+                }
+            }
+        ])
+    ]);
+    const statusMap = {};
+    for (const assignment of assignments) {
+        const studentId = String(assignment.studentId);
+        statusMap[studentId] = { balance: 0, assigned: true };
+    }
+    for (const row of balanceRows) {
+        const studentId = String(row._id);
+        const existing = statusMap[studentId];
+        statusMap[studentId] = {
+            balance: row.balance,
+            assigned: existing?.assigned ?? false
+        };
+    }
+    return statusMap;
+};
+exports.buildStudentFeeStatusMapForStudents = buildStudentFeeStatusMapForStudents;
 const buildStudentFeeStatusMapsByYear = async (organizationId, academicYears) => {
     const uniqueYears = [...new Set(academicYears.filter((year) => year.length > 0))];
     const maps = await Promise.all(uniqueYears.map(async (academicYear) => ({

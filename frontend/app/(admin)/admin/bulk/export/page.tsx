@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { PageWrapper } from "@/components/layout/PageWrapper";
@@ -9,6 +9,7 @@ import { Card } from "@/components/ui/Card";
 import { useToast } from "@/components/ui/Toast";
 import { downloadFromApi } from "@/lib/fileDownload";
 import { ACADEMIC_YEAR } from "@/lib/constants";
+import { useOrgConfig } from "@/hooks/useOrgConfig";
 import { api } from "@/lib/api";
 import type { Bus } from "@/types";
 
@@ -16,6 +17,7 @@ type ExportKey = "students" | "fees" | "outstanding" | "expenses";
 
 const BulkExportPage = (): JSX.Element => {
   const { showToast } = useToast();
+  const { gradeOptions } = useOrgConfig();
   const [loading, setLoading] = useState<Record<ExportKey, boolean>>({
     students: false,
     fees: false,
@@ -50,10 +52,7 @@ const BulkExportPage = (): JSX.Element => {
     queryFn: async () => (await api.get<{ data: Bus[] }>("/api/buses")).data.data
   });
 
-  const grades = useMemo(
-    () => ["Nursery", "KG1", "KG2", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"],
-    []
-  );
+  const grades = gradeOptions;
 
   const exportFile = async (
     key: ExportKey,
@@ -122,7 +121,7 @@ const BulkExportPage = (): JSX.Element => {
           <Button
             className="mt-4"
             onClick={() =>
-              exportFile("students", "/api/bulk/export/students", `bustrack_students_${new Date().toISOString().slice(0, 10)}.xlsx`, studentsFilters)
+              exportFile("students", "/api/bulk/export/students", `taksha_students_${new Date().toISOString().slice(0, 10)}.xlsx`, studentsFilters)
             }
             disabled={loading.students}
           >
@@ -171,7 +170,7 @@ const BulkExportPage = (): JSX.Element => {
           <Button
             className="mt-4"
             onClick={() =>
-              exportFile("fees", "/api/bulk/export/fees", `bustrack_fees_${new Date().toISOString().slice(0, 10)}.xlsx`, feesFilters)
+              exportFile("fees", "/api/bulk/export/fees", `taksha_fees_${new Date().toISOString().slice(0, 10)}.xlsx`, feesFilters)
             }
             disabled={loading.fees}
           >
@@ -208,7 +207,7 @@ const BulkExportPage = (): JSX.Element => {
               exportFile(
                 "outstanding",
                 "/api/bulk/export/school-fees-outstanding",
-                `bustrack_school_fees_outstanding_${new Date().toISOString().slice(0, 10)}.xlsx`,
+                `taksha_school_fees_outstanding_${new Date().toISOString().slice(0, 10)}.xlsx`,
                 outstandingFilters
               )
             }
@@ -263,7 +262,7 @@ const BulkExportPage = (): JSX.Element => {
               exportFile(
                 "expenses",
                 "/api/bulk/export/expenses",
-                `bustrack_expenses_${new Date().toISOString().slice(0, 10)}.xlsx`,
+                `taksha_expenses_${new Date().toISOString().slice(0, 10)}.xlsx`,
                 expensesFilters
               )
             }

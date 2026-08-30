@@ -6,6 +6,7 @@ import { ReceiptDownload } from "@/components/payments/ReceiptDownload";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
+import { useOrgTheme } from "@/hooks/useOrgTheme";
 import { useRazorpay, type RazorpayResponse } from "@/hooks/useRazorpay";
 import {
   createPaymentOrder,
@@ -46,6 +47,7 @@ export const PaymentModeModal = ({
 }: Props): JSX.Element | null => {
   const { showToast } = useToast();
   const { isLoaded, openCheckout } = useRazorpay();
+  const { displayLabel, brandColor } = useOrgTheme();
 
   const [tab, setTab] = useState<TabId>("online");
   const [loading, setLoading] = useState(false);
@@ -120,9 +122,9 @@ export const PaymentModeModal = ({
         amount: order.amount,
         currency: order.currency,
         order_id: order.orderId,
-        name: "BusTrack",
+        name: displayLabel,
         description,
-        theme: { color: "#ea580c" },
+        theme: { color: brandColor },
         handler: async (response: RazorpayResponse) => {
           setLoading(true);
           try {

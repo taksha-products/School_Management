@@ -40,7 +40,7 @@ const SuperLayout = ({ children }: { children: ReactNode }): JSX.Element => {
 
   return (
     <div className="flex h-screen overflow-hidden bg-gray-50">
-      <Sidebar legacyItems={superNav} brand="BusTrack" roleBadge="Super Admin" />
+      <Sidebar legacyItems={superNav} brand="TAKSHA" roleBadge="Super Admin" />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <Header portalLabel="Super Admin" />
         <main className="min-h-0 flex-1 overflow-y-auto bg-gray-50">{children}</main>

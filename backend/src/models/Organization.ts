@@ -1,5 +1,7 @@
 import { model, Schema, type Document } from "mongoose";
 
+import type { InstitutionType } from "../constants/institutionTemplates";
+
 export type OrganizationPlan = "trial" | "basic" | "pro" | "cancelled";
 
 export type OrganizationFeatures = {
@@ -13,6 +15,11 @@ export type OrganizationFeatures = {
   whatsappNotifications: boolean;
   transportManagement: boolean;
 };
+
+export interface OrgGradeEntry {
+  label: string;
+  sections: string[];
+}
 
 export const ORGANIZATION_FEATURE_KEYS = [
   "busManagement",
@@ -37,6 +44,14 @@ const organizationFeaturesSchema = new Schema<OrganizationFeatures>(
     expenseTracking: { type: Boolean, default: true },
     whatsappNotifications: { type: Boolean, default: false },
     transportManagement: { type: Boolean, default: true }
+  },
+  { _id: false }
+);
+
+const orgGradeSchema = new Schema<OrgGradeEntry>(
+  {
+    label: { type: String, required: true, trim: true },
+    sections: { type: [String], default: [] }
   },
   { _id: false }
 );
@@ -81,16 +96,20 @@ export interface IOrganization extends Document {
   phone?: string;
   email?: string;
   logo?: string;
+  logoUrl?: string;
+  brandColor?: string;
+  displayName?: string;
   plan: OrganizationPlan;
   isActive: boolean;
   deletedAt?: Date;
   currentAcademicYear?: string;
+  institutionType: InstitutionType;
+  grades: OrgGradeEntry[];
   features: OrganizationFeatures;
   featureOverrides: Map<string, boolean>;
   enabledFeatures: string[];
 }
 
-// Migration note: existing organizations receive feature defaults on next read/save (Mongoose defaults).
 const organizationSchema = new Schema<IOrganization>(
   {
     name: { type: String, required: true },
@@ -99,10 +118,19 @@ const organizationSchema = new Schema<IOrganization>(
     phone: { type: String },
     email: { type: String },
     logo: { type: String },
+    logoUrl: { type: String },
+    brandColor: { type: String },
+    displayName: { type: String, trim: true },
     plan: { type: String, enum: ["trial", "basic", "pro", "cancelled"], default: "trial" },
     isActive: { type: Boolean, default: true },
     deletedAt: { type: Date },
     currentAcademicYear: { type: String, default: "2025-26" },
+    institutionType: {
+      type: String,
+      enum: ["school", "college", "other"],
+      default: "school"
+    },
+    grades: { type: [orgGradeSchema], default: [] },
     features: {
       type: organizationFeaturesSchema,
       default: defaultOrganizationFeatures

@@ -1,9 +1,9 @@
 "use client";
 
-import { Bus } from "lucide-react";
 import type { JSX } from "react";
 
 import { Button } from "@/components/ui/Button";
+import { ReceiptOrgHeader } from "@/components/shared/BrandLogo";
 import { formatINR } from "@/lib/utils";
 import type { SchoolFeeReceipt } from "@/types/schoolFees";
 
@@ -31,15 +31,7 @@ export const FeeReceiptPrint = ({
     <div className="flex min-h-screen flex-col items-center bg-gray-50 p-6 print:bg-white">
       <div className="w-full max-w-[520px] rounded-2xl border border-gray-200 bg-white p-8 text-gray-900 shadow-md print:border-0 print:shadow-none">
         <div className="mb-5 flex items-start justify-between gap-4">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary">
-              <Bus className="h-4 w-4 text-white" strokeWidth={2.5} />
-            </div>
-            <div>
-              <h1 className="text-lg font-bold text-gray-900">BusTrack</h1>
-              <p className="text-xs text-gray-500">{title}</p>
-            </div>
-          </div>
+          <ReceiptOrgHeader subtitle={title} />
           <div className="text-right">
             <p className="text-xs font-medium uppercase tracking-wide text-gray-400">
               Receipt

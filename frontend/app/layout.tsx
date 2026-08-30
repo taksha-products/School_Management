@@ -8,8 +8,8 @@ import { AppProviders } from "@/components/providers/AppProviders";
 const dmSans = DM_Sans({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "BusTrack",
-  description: "School bus management system"
+  title: "TAKSHA",
+  description: "School management platform"
 };
 
 export default function RootLayout({

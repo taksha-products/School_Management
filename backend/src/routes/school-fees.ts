@@ -13,7 +13,8 @@ import {
   buildOrgFeeSummary,
   buildReceiptView,
   buildStudentFeeLedgerView,
-  buildStudentFeeStatusMap
+  buildStudentFeeStatusMap,
+  buildStudentFeeStatusMapForStudents
 } from "../services/schoolFeeService";
 import {
   applySchoolPaymentLinesToLedger,
@@ -232,7 +233,10 @@ schoolFeesRouter.get(
   asyncHandler(async (req, res) => {
     const authReq = req as AuthenticatedRequest;
     const orgId = getScopedOrganizationId(authReq, res)!;
-    const { academicYear } = req.query as { academicYear?: string };
+    const { academicYear, studentIds: studentIdsRaw } = req.query as {
+      academicYear?: string;
+      studentIds?: string;
+    };
 
     if (!academicYear) {
       res.status(400).json({
@@ -243,7 +247,17 @@ schoolFeesRouter.get(
       return;
     }
 
-    const statusMap = await buildStudentFeeStatusMap(orgId, academicYear);
+    const studentIds = studentIdsRaw
+      ? studentIdsRaw
+          .split(",")
+          .map((id) => id.trim())
+          .filter((id) => id.length > 0)
+      : [];
+
+    const statusMap =
+      studentIds.length > 0
+        ? await buildStudentFeeStatusMapForStudents(orgId, academicYear, studentIds)
+        : await buildStudentFeeStatusMap(orgId, academicYear);
 
     res.json({
       success: true,

@@ -11,6 +11,7 @@ const auth_1 = require("../middleware/auth");
 const require2FA_1 = require("../middleware/require2FA");
 const validate_1 = require("../middleware/validate");
 const Organization_1 = require("../models/Organization");
+const orgThemeService_1 = require("../services/orgThemeService");
 const RefreshToken_1 = require("../models/RefreshToken");
 const User_1 = require("../models/User");
 const asyncHandler_1 = require("../utils/asyncHandler");
@@ -78,10 +79,9 @@ const issueSession = async (user, req, res, updateTwoFactorVerified = false) => 
 };
 const getOrganizationName = async (user) => {
     if (!user.organizationId) {
-        return "BusTrack";
+        return "TAKSHA";
     }
-    const organization = await Organization_1.Organization.findById(user.organizationId);
-    return organization?.name ?? "BusTrack";
+    return (0, orgThemeService_1.getOrgBrandingLabel)(user.organizationId.toString());
 };
 const logSuspiciousEvent = (event, details) => {
     console.warn({

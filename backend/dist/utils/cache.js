@@ -2,10 +2,10 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.invalidateOrgSchoolFeesCache = exports.invalidateOrgReportsCache = exports.clearOrgCache = exports.deleteCached = exports.setCached = exports.getCached = exports.orgCacheKey = void 0;
 const redis_1 = require("../config/redis");
-const KEY_PREFIX = "bustrack:";
+const KEY_PREFIX = "taksha:";
 /**
  * Builds a cache key scoped to an organization.
- * Stored in Redis as `bustrack:org:{orgId}:{suffix}`.
+ * Stored in Redis as `taksha:org:{orgId}:{suffix}`.
  */
 const orgCacheKey = (orgId, suffix) => `org:${orgId}:${suffix}`;
 exports.orgCacheKey = orgCacheKey;
@@ -92,7 +92,7 @@ const deleteCached = async (key) => {
 exports.deleteCached = deleteCached;
 /**
  * Deletes all cache keys for an organization using SCAN (never KEYS).
- * Matches `bustrack:org:{orgId}:*`.
+ * Matches `taksha:org:{orgId}:*`.
  */
 const clearOrgCache = async (orgId) => {
     await scanAndDelete(`${KEY_PREFIX}org:${orgId}:*`);

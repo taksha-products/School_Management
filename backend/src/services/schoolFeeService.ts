@@ -72,6 +72,73 @@ export const buildStudentFeeStatusMap = async (
   return statusMap;
 };
 
+export const buildStudentFeeStatusMapForStudents = async (
+  organizationId: string,
+  academicYear: string,
+  studentIds: string[]
+): Promise<StudentFeeStatusMap> => {
+  if (studentIds.length === 0) {
+    return {};
+  }
+
+  const organizationObjectId = new Types.ObjectId(organizationId);
+  const uniqueStudentIds = [...new Set(studentIds.filter((id) => Types.ObjectId.isValid(id)))];
+  if (uniqueStudentIds.length === 0) {
+    return {};
+  }
+
+  const studentObjectIds = uniqueStudentIds.map((id) => new Types.ObjectId(id));
+
+  const [assignments, balanceRows] = await Promise.all([
+    StudentFeeAssignment.find({
+      organizationId: organizationObjectId,
+      academicYear,
+      isActive: true,
+      studentId: { $in: studentObjectIds }
+    }).select("studentId"),
+    FeeLedger.aggregate<{ _id: Types.ObjectId; balance: number }>([
+      {
+        $match: {
+          organizationId: organizationObjectId,
+          academicYear,
+          studentId: { $in: studentObjectIds }
+        }
+      },
+      {
+        $group: {
+          _id: "$studentId",
+          balance: {
+            $sum: {
+              $max: [
+                0,
+                { $subtract: [{ $add: ["$amountDue", "$lateFee"] }, "$amountPaid"] }
+              ]
+            }
+          }
+        }
+      }
+    ])
+  ]);
+
+  const statusMap: StudentFeeStatusMap = {};
+
+  for (const assignment of assignments) {
+    const studentId = String(assignment.studentId);
+    statusMap[studentId] = { balance: 0, assigned: true };
+  }
+
+  for (const row of balanceRows) {
+    const studentId = String(row._id);
+    const existing = statusMap[studentId];
+    statusMap[studentId] = {
+      balance: row.balance,
+      assigned: existing?.assigned ?? false
+    };
+  }
+
+  return statusMap;
+};
+
 export const buildStudentFeeStatusMapsByYear = async (
   organizationId: string,
   academicYears: string[]

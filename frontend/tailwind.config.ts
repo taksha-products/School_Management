@@ -11,14 +11,14 @@ const config: Config = {
     extend: {
       colors: {
         primary: {
-          DEFAULT: "#fd6d00",
-          hover: "#e56200",
-          50: "#fff7f0",
-          100: "#fee3c7",
-          200: "#febb71",
+          DEFAULT: "var(--brand-color, #F97316)",
+          hover: "var(--brand-color-hover, #ea580c)",
+          50: "var(--brand-color-50, #fff7ed)",
+          100: "var(--brand-color-100, #ffedd5)",
+          200: "var(--brand-color-200, #fed7aa)",
           300: "#fe9b30",
-          400: "#fd6d00",
-          500: "#e56200",
+          400: "var(--brand-color, #F97316)",
+          500: "var(--brand-color-hover, #ea580c)",
           600: "#c45300",
           700: "#9c4200"
         },

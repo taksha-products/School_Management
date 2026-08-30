@@ -24,6 +24,10 @@ const organizationFeaturesSchema = new mongoose_1.Schema({
     whatsappNotifications: { type: Boolean, default: false },
     transportManagement: { type: Boolean, default: true }
 }, { _id: false });
+const orgGradeSchema = new mongoose_1.Schema({
+    label: { type: String, required: true, trim: true },
+    sections: { type: [String], default: [] }
+}, { _id: false });
 const defaultOrganizationFeatures = () => ({
     busManagement: true,
     gpsTracking: false,
@@ -51,7 +55,6 @@ const resolveFeatureEnabled = (features, featureOverrides, flag) => {
     return resolved[flag];
 };
 exports.resolveFeatureEnabled = resolveFeatureEnabled;
-// Migration note: existing organizations receive feature defaults on next read/save (Mongoose defaults).
 const organizationSchema = new mongoose_1.Schema({
     name: { type: String, required: true },
     code: { type: String, required: true },
@@ -59,10 +62,19 @@ const organizationSchema = new mongoose_1.Schema({
     phone: { type: String },
     email: { type: String },
     logo: { type: String },
+    logoUrl: { type: String },
+    brandColor: { type: String },
+    displayName: { type: String, trim: true },
     plan: { type: String, enum: ["trial", "basic", "pro", "cancelled"], default: "trial" },
     isActive: { type: Boolean, default: true },
     deletedAt: { type: Date },
     currentAcademicYear: { type: String, default: "2025-26" },
+    institutionType: {
+        type: String,
+        enum: ["school", "college", "other"],
+        default: "school"
+    },
+    grades: { type: [orgGradeSchema], default: [] },
     features: {
         type: organizationFeaturesSchema,
         default: defaultOrganizationFeatures

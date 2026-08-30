@@ -27,7 +27,7 @@ export const generateSecret = (
   organizationName: string
 ): TotpSecretResult => {
   const generated = speakeasy.generateSecret({
-    name: `BusTrack:${userEmail}`,
+    name: `${organizationName}:${userEmail}`,
     issuer: organizationName,
     length: 20
   });
@@ -41,7 +41,7 @@ export const generateSecret = (
     generated.otpauth_url ??
     speakeasy.otpauthURL({
       secret,
-      label: `BusTrack:${userEmail}`,
+      label: `${organizationName}:${userEmail}`,
       issuer: organizationName,
       encoding: "base32"
     });

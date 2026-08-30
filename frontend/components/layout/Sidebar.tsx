@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bus, ChevronDown, LogOut } from "lucide-react";
+import { Bus, ChevronDown, LogOut, Upload } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
 
+import { BrandLogo } from "@/components/shared/BrandLogo";
 import { useFeesOutstandingBadge } from "@/hooks/useFeesOutstandingBadge";
 import { useOrgFeatures } from "@/hooks/useOrgFeatures";
 import { getUser, logout } from "@/lib/auth";
@@ -18,14 +19,27 @@ const STORAGE_KEY = "sidebar_collapsed";
 const pathMatches = (pathname: string, href: string): boolean =>
   pathname === href || pathname.startsWith(`${href}/`);
 
+const navSectionMatches = (pathname: string, item: AdminNavItem): boolean => {
+  if (item.href.startsWith("/admin/fees") && pathname.startsWith("/admin/fees")) {
+    return true;
+  }
+  if (
+    item.href.startsWith("/admin/transport") &&
+    (pathname.startsWith("/admin/transport") || pathname.startsWith("/admin/gps"))
+  ) {
+    return true;
+  }
+  return pathMatches(pathname, item.href);
+};
+
 const itemIsActive = (pathname: string, item: AdminNavItem): boolean => {
   if (item.children?.length) {
     return (
       item.children.some((c) => pathMatches(pathname, c.href)) ||
-      pathMatches(pathname, item.href)
+      navSectionMatches(pathname, item)
     );
   }
-  return pathMatches(pathname, item.href);
+  return navSectionMatches(pathname, item);
 };
 
 const sectionKeyForPath = (pathname: string): string | null => {
@@ -33,7 +47,7 @@ const sectionKeyForPath = (pathname: string): string | null => {
     if (!item.children?.length) continue;
     if (
       item.children.some((c) => pathMatches(pathname, c.href)) ||
-      pathMatches(pathname, item.href)
+      navSectionMatches(pathname, item)
     ) {
       return item.href;
     }
@@ -46,6 +60,9 @@ interface SidebarProps {
   legacyItems?: NavEntry[];
   brand?: string;
   roleBadge?: string;
+  whiteLabel?: boolean;
+  mobileOpen?: boolean;
+  onMobileClose?: () => void;
 }
 
 const userInitials = (name: string): string =>
@@ -60,12 +77,14 @@ const LegacySidebar = ({
   items,
   brand,
   roleBadge,
-  collapsed
+  collapsed,
+  whiteLabel = false
 }: {
   items: NavEntry[];
   brand: string;
   roleBadge?: string;
   collapsed: boolean;
+  whiteLabel?: boolean;
 }): JSX.Element => {
   const pathname = usePathname();
   const user = getUser();
@@ -78,18 +97,24 @@ const LegacySidebar = ({
       )}
     >
       <div className="flex h-16 shrink-0 items-center gap-2.5 border-b border-gray-200 px-5">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary">
-          <Bus className="h-4 w-4 text-white" strokeWidth={2.5} />
-        </div>
-        {!collapsed && (
-          <div>
-            <p className="text-lg font-bold text-gray-900">{brand}</p>
-            {roleBadge && (
-              <span className="mt-0.5 inline-block rounded-full bg-primary-100 px-2 py-0.5 text-[10px] font-semibold text-primary">
-                {roleBadge}
-              </span>
+        {whiteLabel ? (
+          <BrandLogo compact={collapsed} />
+        ) : (
+          <>
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary">
+              <Bus className="h-4 w-4 text-white" strokeWidth={2.5} />
+            </div>
+            {!collapsed && (
+              <div>
+                <p className="text-lg font-bold text-gray-900">{brand}</p>
+                {roleBadge && (
+                  <span className="mt-0.5 inline-block rounded-full bg-primary-100 px-2 py-0.5 text-[10px] font-semibold text-primary">
+                    {roleBadge}
+                  </span>
+                )}
+              </div>
             )}
-          </div>
+          </>
         )}
       </div>
       <nav className="flex-1 space-y-0.5 overflow-y-auto p-3">
@@ -116,7 +141,7 @@ const LegacySidebar = ({
               className={cn(
                 "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-all duration-150",
                 active
-                  ? "bg-primary-50 font-medium text-primary shadow-[inset_3px_0_0_0_#fd6d00]"
+                  ? "bg-primary-50 font-medium text-primary shadow-[inset_3px_0_0_0_var(--brand-color)]"
                   : "text-gray-700 hover:bg-gray-50 hover:text-primary"
               )}
             >
@@ -156,8 +181,11 @@ const LegacySidebar = ({
 export const Sidebar = ({
   items = adminNav,
   legacyItems,
-  brand = "BusTrack",
-  roleBadge
+  brand = "TAKSHA",
+  roleBadge,
+  whiteLabel = false,
+  mobileOpen = false,
+  onMobileClose
 }: SidebarProps): JSX.Element => {
   const pathname = usePathname();
   const outstandingBadge = useFeesOutstandingBadge();
@@ -186,6 +214,7 @@ export const Sidebar = ({
         brand={brand}
         roleBadge={roleBadge}
         collapsed={collapsed}
+        whiteLabel={whiteLabel}
       />
     );
   }
@@ -219,7 +248,7 @@ export const Sidebar = ({
                 className={cn(
                   "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-all duration-150",
                   active
-                    ? "bg-primary-50 font-medium text-primary shadow-[inset_3px_0_0_0_#fd6d00]"
+                    ? "bg-primary-50 font-medium text-primary shadow-[inset_3px_0_0_0_var(--brand-color)]"
                     : "text-gray-700 hover:bg-gray-50 hover:text-primary"
                 )}
               >
@@ -254,25 +283,71 @@ export const Sidebar = ({
                   )}
                 >
                   <div className="space-y-0.5 py-1">
-                    {item.children!.map((child) => {
-                      const childActive = pathMatches(pathname, child.href);
-                      return (
-                        <Link
-                          key={child.href}
-                          href={child.href}
-                          className={cn(
-                            "block rounded-lg py-1.5 pl-10 pr-3 text-[13px] transition-colors",
-                            childActive
-                              ? "font-medium text-primary"
-                              : "text-gray-500 hover:text-primary"
-                          )}
-                        >
-                          {child.label}
-                        </Link>
-                      );
-                    })}
+                    {item
+                      .children!.filter(
+                        (child) =>
+                          !child.featureFlag || enabledFeatures.includes(child.featureFlag)
+                      )
+                      .map((child) => {
+                        const childActive = pathMatches(pathname, child.href);
+                        return (
+                          <Link
+                            key={child.href}
+                            href={child.href}
+                            onClick={onMobileClose}
+                            className={cn(
+                              "block rounded-lg py-1.5 pl-10 pr-3 text-[13px] transition-colors",
+                              childActive
+                                ? "font-medium text-primary"
+                                : "text-gray-500 hover:text-primary"
+                            )}
+                          >
+                            {child.label}
+                          </Link>
+                        );
+                      })}
                   </div>
                 </div>
+              )}
+            </div>
+          );
+        }
+
+        if (item.quickAction) {
+          return (
+            <div
+              key={item.href}
+              className={cn(
+                "flex items-center rounded-lg pr-1 transition-all duration-150",
+                active ? "bg-primary-50 shadow-[inset_3px_0_0_0_var(--brand-color)]" : "hover:bg-gray-50"
+              )}
+            >
+              <Link
+                href={item.href}
+                title={collapsed ? item.label : undefined}
+                onClick={onMobileClose}
+                className={cn(
+                  "flex flex-1 items-center gap-2.5 px-3 py-2 text-sm",
+                  active ? "font-medium text-primary" : "text-gray-700 hover:text-primary"
+                )}
+              >
+                <Icon
+                  className={cn(
+                    "h-[18px] w-[18px] shrink-0",
+                    active ? "text-primary" : "text-gray-500"
+                  )}
+                />
+                {!collapsed && <span>{item.label}</span>}
+              </Link>
+              {!collapsed && (
+                <Link
+                  href={item.quickAction.href}
+                  title={item.quickAction.title}
+                  onClick={onMobileClose}
+                  className="rounded-md p-1.5 text-gray-400 transition hover:bg-primary-100 hover:text-primary"
+                >
+                  <Upload className="h-4 w-4" />
+                </Link>
               )}
             </div>
           );
@@ -283,10 +358,11 @@ export const Sidebar = ({
             key={item.href}
             href={item.href}
             title={collapsed ? item.label : undefined}
+            onClick={onMobileClose}
             className={cn(
               "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-all duration-150",
               active
-                ? "bg-primary-50 font-medium text-primary shadow-[inset_3px_0_0_0_#fd6d00]"
+                ? "bg-primary-50 font-medium text-primary shadow-[inset_3px_0_0_0_var(--brand-color)]"
                 : "text-gray-700 hover:bg-gray-50 hover:text-primary"
             )}
           >
@@ -300,28 +376,53 @@ export const Sidebar = ({
           </Link>
         );
       });
-  }, [items, pathname, openSection, collapsed, outstandingBadge, toggleSection, enabledFeatures]);
+  }, [
+    items,
+    pathname,
+    openSection,
+    collapsed,
+    outstandingBadge,
+    toggleSection,
+    enabledFeatures,
+    onMobileClose
+  ]);
 
   return (
-    <aside
-      className={cn(
-        "flex h-full shrink-0 flex-col border-r border-gray-200 bg-white transition-[width] duration-200",
-        collapsed ? "w-14" : "w-60"
+    <>
+      {mobileOpen && (
+        <button
+          type="button"
+          aria-label="Close navigation menu"
+          className="fixed inset-0 z-40 bg-black/40 md:hidden"
+          onClick={onMobileClose}
+        />
       )}
-    >
+      <aside
+        className={cn(
+          "fixed inset-y-0 left-0 z-50 flex h-full shrink-0 flex-col border-r border-gray-200 bg-white transition-[width,transform] duration-200 md:relative md:z-auto md:translate-x-0",
+          collapsed ? "w-14" : "w-60",
+          mobileOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
+        )}
+      >
       <div className="flex h-16 shrink-0 items-center gap-2.5 border-b border-gray-200 px-5">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary">
-          <Bus className="h-4 w-4 text-white" strokeWidth={2.5} />
-        </div>
-        {!collapsed && (
-          <div>
-            <p className="text-lg font-bold leading-tight text-gray-900">{brand}</p>
-            {roleBadge && (
-              <span className="mt-0.5 inline-block rounded-full bg-primary-100 px-2 py-0.5 text-[10px] font-semibold text-primary">
-                {roleBadge}
-              </span>
+        {whiteLabel ? (
+          <BrandLogo compact={collapsed} />
+        ) : (
+          <>
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary">
+              <Bus className="h-4 w-4 text-white" strokeWidth={2.5} />
+            </div>
+            {!collapsed && (
+              <div>
+                <p className="text-lg font-bold leading-tight text-gray-900">{brand}</p>
+                {roleBadge && (
+                  <span className="mt-0.5 inline-block rounded-full bg-primary-100 px-2 py-0.5 text-[10px] font-semibold text-primary">
+                    {roleBadge}
+                  </span>
+                )}
+              </div>
             )}
-          </div>
+          </>
         )}
       </div>
 
@@ -355,6 +456,7 @@ export const Sidebar = ({
         {collapsed ? "→" : "← Collapse"}
       </button>
     </aside>
+    </>
   );
 };
 

@@ -3,29 +3,33 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { ChevronDown, Upload } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
 import { StudentTransportModal } from "@/components/admin/StudentTransportModal";
 import { ListPagination } from "@/components/shared/ListPagination";
 import { PageWrapper } from "@/components/layout/PageWrapper";
+import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Modal } from "@/components/ui/Modal";
 import { TableSkeleton } from "@/components/ui/TableSkeleton";
 import { useToast } from "@/components/ui/Toast";
 import { ACADEMIC_YEAR } from "@/lib/constants";
+import { formatGradeDisplay, useOrgConfig } from "@/hooks/useOrgConfig";
 import { api } from "@/lib/api";
 import { downloadFromApi } from "@/lib/fileDownload";
 import { formatINR } from "@/lib/utils";
 import type { PaginatedResponse } from "@/types/pagination";
-import type { Bus, FeePayment, Student } from "@/types";
+import type { FeePayment, Student } from "@/types";
 import type { StudentFeeStatusMap } from "@/types/schoolFees";
 
 const studentSchema = z.object({
   name: z.string().min(2),
   grade: z.string().min(1),
+  section: z.string().optional(),
   parentName: z.string().min(2),
   parentPhone: z.string().min(10),
   address: z.string().optional(),
@@ -43,35 +47,42 @@ const recentMonths = Array.from({ length: 6 }).map((_, i) => {
 const StudentsPage = (): JSX.Element => {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
+  const { gradeOptions, getSectionsForGrade } = useOrgConfig();
   const [open, setOpen] = useState(false);
   const [transportOpen, setTransportOpen] = useState(false);
   const [editing, setEditing] = useState<Student | null>(null);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [transportStudent, setTransportStudent] = useState<Student | null>(null);
   const [search, setSearch] = useState("");
-  const [busFilter, setBusFilter] = useState("");
   const [gradeFilter, setGradeFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("active");
   const [page, setPage] = useState(1);
   const [isExporting, setIsExporting] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [deactivateConfirmOpen, setDeactivateConfirmOpen] = useState(false);
+  const [moreActionsOpen, setMoreActionsOpen] = useState(false);
+  const moreActionsRef = useRef<HTMLDivElement>(null);
 
   const showBulkSelect = statusFilter === "active";
 
   useEffect(() => {
     setPage(1);
     setSelectedIds([]);
-  }, [search, busFilter, gradeFilter, statusFilter]);
+  }, [search, gradeFilter, statusFilter]);
+
+  useEffect(() => {
+    const onDoc = (event: MouseEvent): void => {
+      if (moreActionsRef.current && !moreActionsRef.current.contains(event.target as Node)) {
+        setMoreActionsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
 
   const form = useForm<StudentForm>({
     resolver: zodResolver(studentSchema),
     defaultValues: { status: "active", academicYear: "2025-26" }
-  });
-
-  const busesQuery = useQuery({
-    queryKey: ["buses-compact"],
-    queryFn: async () => (await api.get<{ data: Bus[] }>("/api/buses")).data.data
   });
 
   const gradesQuery = useQuery({
@@ -80,13 +91,12 @@ const StudentsPage = (): JSX.Element => {
   });
 
   const studentsQuery = useQuery({
-    queryKey: ["students", { page, search, busId: busFilter, grade: gradeFilter, status: statusFilter }],
+    queryKey: ["students", { page, search, grade: gradeFilter, status: statusFilter }],
     queryFn: async () =>
       (
         await api.get<PaginatedResponse<Student>>("/api/students", {
           params: {
             search: search || undefined,
-            busId: busFilter || undefined,
             grade: gradeFilter || undefined,
             status: statusFilter || undefined,
             withTransport: true,
@@ -120,12 +130,20 @@ const StudentsPage = (): JSX.Element => {
     }
   });
 
+  const selectedGrade = form.watch("grade");
+  const selectedGradeSections = getSectionsForGrade(selectedGrade);
+
   const mutation = useMutation({
     mutationFn: async (payload: StudentForm) => {
+      const body = {
+        ...payload,
+        section:
+          selectedGradeSections.length > 0 ? payload.section || undefined : undefined
+      };
       if (editing) {
-        return api.put(`/api/students/${editing._id}`, payload);
+        return api.put(`/api/students/${editing._id}`, body);
       }
-      return api.post("/api/students", payload);
+      return api.post("/api/students", body);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["students"] });
@@ -137,18 +155,27 @@ const StudentsPage = (): JSX.Element => {
     onError: () => showToast("error", "Failed to save student")
   });
 
+  const rows = useMemo(() => studentsQuery.data?.data ?? [], [studentsQuery.data]);
+  const pagination = studentsQuery.data?.pagination;
+  const visibleStudentIds = useMemo(
+    () => rows.map((student) => student._id).sort().join(","),
+    [rows]
+  );
+
   const feeStatusQuery = useQuery({
-    queryKey: ["students-fee-status", ACADEMIC_YEAR],
+    queryKey: ["students-fee-status", ACADEMIC_YEAR, visibleStudentIds],
+    enabled: rows.length > 0,
     queryFn: async () => {
       const res = await api.get<{ data: StudentFeeStatusMap }>("/api/school-fees/student-fee-status", {
-        params: { academicYear: ACADEMIC_YEAR }
+        params: {
+          academicYear: ACADEMIC_YEAR,
+          studentIds: rows.map((student) => student._id).join(",")
+        }
       });
       return res.data.data;
     }
   });
 
-  const rows = useMemo(() => studentsQuery.data?.data ?? [], [studentsQuery.data]);
-  const pagination = studentsQuery.data?.pagination;
   const feeStatusByStudent = feeStatusQuery.data ?? {};
 
   const allVisibleSelected =
@@ -195,9 +222,8 @@ const StudentsPage = (): JSX.Element => {
       setIsExporting(true);
       await downloadFromApi(
         "/api/bulk/export/students",
-        `bustrack_students_${new Date().toISOString().slice(0, 10)}.xlsx`,
+        `taksha_students_${new Date().toISOString().slice(0, 10)}.xlsx`,
         {
-          busId: busFilter || undefined,
           grade: gradeFilter || undefined,
           status: statusFilter || undefined
         }
@@ -214,10 +240,33 @@ const StudentsPage = (): JSX.Element => {
     <PageWrapper
       title="Students"
       action={
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <div className="relative" ref={moreActionsRef}>
+            <Button variant="secondary" onClick={() => setMoreActionsOpen((open) => !open)}>
+              More actions
+              <ChevronDown className="ml-1 inline h-4 w-4" />
+            </Button>
+            {moreActionsOpen && (
+              <div className="absolute right-0 top-full z-50 mt-1 min-w-[180px] rounded-lg border border-gray-200 bg-white py-1 shadow-md">
+                <Link
+                  href="/admin/bulk/grade-promotion"
+                  className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                  onClick={() => setMoreActionsOpen(false)}
+                >
+                  Grade promotion
+                </Link>
+              </div>
+            )}
+          </div>
           <Button variant="secondary" onClick={handleExport} disabled={isExporting}>
             {isExporting ? "Exporting..." : "Export"}
           </Button>
+          <Link href="/admin/bulk/upload-students">
+            <Button variant="secondary">
+              <Upload className="mr-1 inline h-4 w-4" />
+              Import
+            </Button>
+          </Link>
           <Button
             onClick={() => {
               setEditing(null);
@@ -231,25 +280,13 @@ const StudentsPage = (): JSX.Element => {
       }
     >
       <Card>
-        <div className="mb-3 grid gap-2 md:grid-cols-4">
+        <div className="mb-3 grid gap-2 md:grid-cols-3">
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search student name"
             className="rounded border border-slate-200 px-3 py-2 md:col-span-1"
           />
-          <select
-            value={busFilter}
-            onChange={(e) => setBusFilter(e.target.value)}
-            className="rounded border border-slate-200 px-3 py-2"
-          >
-            <option value="">All buses</option>
-            {(busesQuery.data ?? []).map((bus) => (
-              <option key={bus._id} value={bus._id}>
-                {bus.busNumber}
-              </option>
-            ))}
-          </select>
           <select
             value={gradeFilter}
             onChange={(e) => setGradeFilter(e.target.value)}
@@ -318,7 +355,7 @@ const StudentsPage = (): JSX.Element => {
                       </td>
                     )}
                     <td className="py-2">{student.name}</td>
-                    <td>{student.grade}</td>
+                    <td>{formatGradeDisplay(student.grade, student.section)}</td>
                     <td>
                       <button
                         type="button"
@@ -347,13 +384,11 @@ const StudentsPage = (): JSX.Element => {
                           );
                         }
                         if (feeStatus.balance <= 0) {
-                          return (
-                            <span className="text-xs font-medium text-emerald-700">All paid</span>
-                          );
+                          return <Badge status="paid">Paid</Badge>;
                         }
                         return (
                           <Link
-                            href={`/admin/school-fees?studentId=${student._id}`}
+                            href={`/admin/fees/collect?studentId=${student._id}`}
                             onClick={(e) => e.stopPropagation()}
                             className="text-xs font-medium text-rose-600 hover:underline"
                           >
@@ -373,7 +408,7 @@ const StudentsPage = (): JSX.Element => {
                           setTransportOpen(true);
                         }}
                       >
-                        Manage Transport
+                        Transport
                       </Button>
                       <Button
                         variant="secondary"
@@ -383,6 +418,7 @@ const StudentsPage = (): JSX.Element => {
                           form.reset({
                             name: student.name,
                             grade: student.grade,
+                            section: student.section ?? "",
                             parentName: student.parentName,
                             parentPhone: student.parentPhone,
                             address: student.address ?? "",
@@ -471,7 +507,24 @@ const StudentsPage = (): JSX.Element => {
       <Modal isOpen={open} onClose={() => setOpen(false)} title={editing ? "Edit Student" : "Add Student"}>
         <form className="grid gap-3" onSubmit={form.handleSubmit((values) => mutation.mutate(values))}>
           <input {...form.register("name")} placeholder="Name" className="rounded border px-3 py-2" />
-          <input {...form.register("grade")} placeholder="Grade" className="rounded border px-3 py-2" />
+          <select {...form.register("grade")} className="rounded border px-3 py-2">
+            <option value="">Select grade</option>
+            {gradeOptions.map((grade) => (
+              <option key={grade} value={grade}>
+                {grade}
+              </option>
+            ))}
+          </select>
+          {selectedGradeSections.length > 0 && (
+            <select {...form.register("section")} className="rounded border px-3 py-2">
+              <option value="">Select section</option>
+              {selectedGradeSections.map((section) => (
+                <option key={section} value={section}>
+                  {section}
+                </option>
+              ))}
+            </select>
+          )}
           <input
             {...form.register("parentName")}
             placeholder="Parent Name"

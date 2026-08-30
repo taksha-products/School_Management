@@ -1,6 +1,6 @@
 "use client";
 
-import { Bell, Calendar, ChevronDown, LogOut } from "lucide-react";
+import { Bell, Calendar, ChevronDown, LogOut, Menu } from "lucide-react";
 import { useEffect, useRef, useState, type JSX } from "react";
 
 import { getUser, logout } from "@/lib/auth";
@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 interface HeaderProps {
   portalLabel?: string;
   welcomeName?: string;
+  onMenuClick?: () => void;
 }
 
 const initials = (name: string): string =>
@@ -19,7 +20,7 @@ const initials = (name: string): string =>
     .slice(0, 2)
     .toUpperCase();
 
-export const Header = ({ portalLabel, welcomeName }: HeaderProps): JSX.Element => {
+export const Header = ({ portalLabel, welcomeName, onMenuClick }: HeaderProps): JSX.Element => {
   const user = getUser();
   const name = welcomeName ?? user?.name ?? "User";
   const role = user?.role ?? "";
@@ -42,8 +43,19 @@ export const Header = ({ portalLabel, welcomeName }: HeaderProps): JSX.Element =
   }, []);
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center justify-between border-b border-gray-200 bg-white px-6">
-      <div className="min-w-0">
+    <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center justify-between border-b border-gray-200 bg-white px-4 md:px-6">
+      <div className="flex min-w-0 items-center gap-3">
+        {onMenuClick && (
+          <button
+            type="button"
+            onClick={onMenuClick}
+            className="rounded-lg p-2 text-gray-600 transition hover:bg-gray-50 md:hidden"
+            aria-label="Open navigation menu"
+          >
+            <Menu className="h-5 w-5" />
+          </button>
+        )}
+        <div className="min-w-0">
         {portalLabel && (
           <p className="text-xs font-medium uppercase tracking-wide text-gray-400">
             {portalLabel}
@@ -53,6 +65,7 @@ export const Header = ({ portalLabel, welcomeName }: HeaderProps): JSX.Element =
           Welcome back, <span className="font-medium text-gray-700">{name}</span>.
           Here&apos;s what&apos;s happening today.
         </p>
+        </div>
       </div>
 
       <div className="flex items-center gap-3">

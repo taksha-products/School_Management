@@ -11,6 +11,12 @@ export type AdminNavIcon =
 export interface AdminNavChild {
   label: string;
   href: string;
+  featureFlag?: string;
+}
+
+export interface AdminNavQuickAction {
+  href: string;
+  title: string;
 }
 
 export interface AdminNavItem {
@@ -19,6 +25,7 @@ export interface AdminNavItem {
   icon: AdminNavIcon;
   badge?: "outstanding";
   featureFlag?: string;
+  quickAction?: AdminNavQuickAction;
   children?: AdminNavChild[];
 }
 
@@ -31,34 +38,33 @@ export const adminNav: AdminNavItem[] = [
   {
     label: "Students",
     href: "/admin/students",
-    icon: "Users"
+    icon: "Users",
+    quickAction: {
+      href: "/admin/bulk/upload-students",
+      title: "Import students"
+    }
   },
   {
     label: "Fees",
-    href: "/admin/fees",
+    href: "/admin/fees/outstanding",
     icon: "Coins",
     badge: "outstanding",
     children: [
-      { label: "Collect fees", href: "/admin/fees" },
       { label: "Outstanding dues", href: "/admin/fees/outstanding" },
-      { label: "Fee structure", href: "/admin/fees/structure" }
+      { label: "Fee structure", href: "/admin/fees/structure" },
+      { label: "Payment history", href: "/admin/fees/history" }
     ]
   },
   {
     label: "Transport",
-    href: "/admin/transport",
+    href: "/admin/transport/buses",
     icon: "Bus",
     children: [
       { label: "Buses", href: "/admin/transport/buses" },
       { label: "Student transport", href: "/admin/transport/students" },
+      { label: "Live Tracking", href: "/admin/gps/live", featureFlag: "gpsTracking" },
       { label: "Expenses", href: "/admin/transport/expenses" }
     ]
-  },
-  {
-    label: "Live Tracking",
-    href: "/admin/gps/live",
-    icon: "MapPin",
-    featureFlag: "gpsTracking"
   },
   {
     label: "Reports",
@@ -86,6 +92,7 @@ export const adminNav: AdminNavItem[] = [
       { label: "Staff accounts", href: "/admin/settings/staff" },
       { label: "Parent accounts", href: "/admin/settings/parents" },
       { label: "Organization", href: "/admin/settings/organization" },
+      { label: "Branding", href: "/admin/settings/branding" },
       { label: "Security", href: "/admin/settings/security" }
     ]
   }

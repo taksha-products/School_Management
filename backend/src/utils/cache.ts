@@ -1,10 +1,10 @@
 import { isRedisReady, redisClient } from "../config/redis";
 
-const KEY_PREFIX = "bustrack:";
+const KEY_PREFIX = "taksha:";
 
 /**
  * Builds a cache key scoped to an organization.
- * Stored in Redis as `bustrack:org:{orgId}:{suffix}`.
+ * Stored in Redis as `taksha:org:{orgId}:{suffix}`.
  */
 export const orgCacheKey = (orgId: string, suffix: string): string => `org:${orgId}:${suffix}`;
 
@@ -100,7 +100,7 @@ export const deleteCached = async (key: string): Promise<void> => {
 
 /**
  * Deletes all cache keys for an organization using SCAN (never KEYS).
- * Matches `bustrack:org:{orgId}:*`.
+ * Matches `taksha:org:{orgId}:*`.
  */
 export const clearOrgCache = async (orgId: string): Promise<void> => {
   await scanAndDelete(`${KEY_PREFIX}org:${orgId}:*`);

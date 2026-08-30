@@ -11,6 +11,7 @@ import { Card } from "@/components/ui/Card";
 import { TableSkeleton } from "@/components/ui/TableSkeleton";
 import { useToast } from "@/components/ui/Toast";
 import { api } from "@/lib/api";
+import { useOrgConfig } from "@/hooks/useOrgConfig";
 import type { Student } from "@/types";
 import type {
   AssignFeeStructurePayload,
@@ -25,6 +26,7 @@ type TargetMode = "grades" | "students";
 
 const AssignFeesPage = (): JSX.Element => {
   const { showToast } = useToast();
+  const { gradeOptions } = useOrgConfig();
   const [step, setStep] = useState(1);
   const [feeStructureId, setFeeStructureId] = useState("");
   const [academicYear, setAcademicYear] = useState("");
@@ -41,11 +43,6 @@ const AssignFeesPage = (): JSX.Element => {
       (await api.get<{ data: FeeStructure[] }>("/api/fee-structure")).data.data.filter(
         (structure) => structure.isActive
       )
-  });
-
-  const gradesQuery = useQuery({
-    queryKey: ["student-grades-assign"],
-    queryFn: async () => (await api.get<{ data: string[] }>("/api/students/grades")).data.data
   });
 
   const studentsQuery = useQuery({
@@ -156,8 +153,6 @@ const AssignFeesPage = (): JSX.Element => {
     }
     assignMutation.mutate(payload);
   };
-
-  const gradeOptions = gradesQuery.data ?? [];
 
   return (
     <PageWrapper title="Assign Fee Structure">

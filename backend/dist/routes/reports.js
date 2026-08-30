@@ -12,6 +12,7 @@ const StudentTransport_1 = require("../models/StudentTransport");
 const asyncHandler_1 = require("../utils/asyncHandler");
 const cache_1 = require("../utils/cache");
 const orgFilter_1 = require("../utils/orgFilter");
+const reportService_1 = require("../services/reportService");
 const reportsRouter = (0, express_1.Router)();
 const scopeMiddleware = [auth_1.auth, orgScope_1.orgScope, requireOrgScope_1.requireOrgScope, roleCheck_1.canAccessOrg];
 const allowReportRead = (req, res, next) => {
@@ -42,128 +43,52 @@ reportsRouter.get("/monthly", ...scopeMiddleware, allowReportRead, (0, asyncHand
         return;
     }
     const orgId = new mongoose_1.Types.ObjectId(orgIdStr);
-    const start = new Date(`${monthKey}-01T00:00:00.000Z`);
-    const end = new Date(start);
-    end.setUTCMonth(end.getUTCMonth() + 1);
-    const summary = await Bus_1.Bus.aggregate([
-        { $match: { organizationId: orgId } },
-        {
-            $lookup: {
-                from: "studenttransports",
-                let: { busId: "$_id", orgId: "$organizationId" },
-                pipeline: [
-                    {
-                        $match: {
-                            $expr: {
-                                $and: [
-                                    { $eq: ["$busId", "$$busId"] },
-                                    { $eq: ["$organizationId", "$$orgId"] },
-                                    { $eq: ["$status", "active"] },
-                                    { $eq: ["$academicYear", academicYear] }
-                                ]
-                            }
-                        }
-                    },
-                    { $project: { _id: 1, monthlyTransportFee: 1 } }
-                ],
-                as: "students"
-            }
-        },
-        {
-            $lookup: {
-                from: "feepayments",
-                let: { busId: "$_id", orgId: "$organizationId" },
-                pipeline: [
-                    {
-                        $match: {
-                            $expr: {
-                                $and: [
-                                    { $eq: ["$busId", "$$busId"] },
-                                    { $eq: ["$organizationId", "$$orgId"] },
-                                    { $eq: ["$month", monthKey] },
-                                    { $eq: ["$academicYear", academicYear] }
-                                ]
-                            }
-                        }
-                    }
-                ],
-                as: "payments"
-            }
-        },
-        {
-            $lookup: {
-                from: "expenses",
-                let: { busId: "$_id", orgId: "$organizationId" },
-                pipeline: [
-                    {
-                        $match: {
-                            $expr: {
-                                $and: [
-                                    { $eq: ["$busId", "$$busId"] },
-                                    { $eq: ["$organizationId", "$$orgId"] },
-                                    { $eq: ["$academicYear", academicYear] },
-                                    { $gte: ["$date", start] },
-                                    { $lt: ["$date", end] },
-                                    { $ne: ["$deleted", true] }
-                                ]
-                            }
-                        }
-                    }
-                ],
-                as: "expenses"
-            }
-        },
-        {
-            $addFields: {
-                totalFeesDue: { $sum: "$students.monthlyTransportFee" },
-                transportStudentCount: { $size: "$students" },
-                totalFeesCollected: {
-                    $sum: {
-                        $map: {
-                            input: {
-                                $filter: {
-                                    input: "$payments",
-                                    as: "payment",
-                                    cond: { $in: ["$$payment.status", ["paid", "partial"]] }
-                                }
-                            },
-                            as: "payment",
-                            in: "$$payment.amountPaid"
-                        }
-                    }
-                },
-                pendingCount: {
-                    $size: {
-                        $filter: {
-                            input: "$payments",
-                            as: "payment",
-                            cond: { $in: ["$$payment.status", ["pending", "overdue"]] }
-                        }
-                    }
-                },
-                totalExpenses: { $sum: "$expenses.amount" },
-                studentCount: { $size: "$students" }
-            }
-        },
-        {
-            $project: {
-                _id: 0,
-                busId: "$_id",
-                busNumber: 1,
-                routeName: 1,
-                totalFeesDue: 1,
-                totalFeesCollected: 1,
-                pendingCount: 1,
-                totalExpenses: 1,
-                netProfit: { $subtract: ["$totalFeesCollected", "$totalExpenses"] },
-                studentCount: 1,
-                transportStudentCount: 1
-            }
-        },
-        { $sort: { busNumber: 1 } }
-    ]);
+    const summary = await (0, reportService_1.buildMonthlyBusReports)(orgId, monthKey, academicYear);
     await (0, cache_1.setCached)(cacheKey, summary, 300);
     res.json({ success: true, data: summary, message: "Monthly report fetched successfully" });
+}));
+reportsRouter.get("/monthly-trend", ...scopeMiddleware, allowReportRead, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    const authReq = req;
+    const { months, academicYear } = req.query;
+    if (!months || !academicYear) {
+        res.status(400).json({
+            success: false,
+            data: null,
+            message: "months and academicYear are required"
+        });
+        return;
+    }
+    const monthKeys = months
+        .split(",")
+        .map((month) => month.trim())
+        .filter((month) => /^\d{4}-\d{2}$/.test(month));
+    if (monthKeys.length === 0 || monthKeys.length > 12) {
+        res.status(400).json({
+            success: false,
+            data: null,
+            message: "Provide 1–12 months in YYYY-MM format"
+        });
+        return;
+    }
+    const orgIdStr = (0, orgFilter_1.getScopedOrganizationId)(authReq, res);
+    const cacheKey = (0, cache_1.orgCacheKey)(orgIdStr, `reports:monthly-trend:${monthKeys.join(",")}:${academicYear}`);
+    const cached = await (0, cache_1.getCached)(cacheKey);
+    if (cached) {
+        res.json({
+            success: true,
+            data: cached,
+            message: "Monthly trend fetched successfully"
+        });
+        return;
+    }
+    const orgId = new mongoose_1.Types.ObjectId(orgIdStr);
+    const data = await (0, reportService_1.buildMonthlyTrend)(orgId, monthKeys, academicYear);
+    await (0, cache_1.setCached)(cacheKey, data, 300);
+    res.json({
+        success: true,
+        data,
+        message: "Monthly trend fetched successfully"
+    });
 }));
 reportsRouter.get("/bus/:id", ...scopeMiddleware, allowReportRead, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     const authReq = req;

@@ -1,22 +1,24 @@
 "use client";
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { PaymentModeModal } from "@/components/payments/PaymentModeModal";
-import { StudentSearch } from "@/components/shared/StudentSearch";
+import { ListPagination } from "@/components/shared/ListPagination";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { TableSkeleton } from "@/components/ui/TableSkeleton";
 import { useToast } from "@/components/ui/Toast";
 import { ACADEMIC_YEAR } from "@/lib/constants";
 import { api } from "@/lib/api";
 import { createSchoolPaymentIntent } from "@/lib/payments";
 import { formatINR } from "@/lib/utils";
 import type { Student } from "@/types";
-import type { LedgerPeriod, StudentFeeLedgerView } from "@/types/schoolFees";
+import type { PaginatedResponse } from "@/types/pagination";
+import type { LedgerPeriod, OutstandingStudent, StudentFeeLedgerView } from "@/types/schoolFees";
 
 type SelectedLine = {
   feeHeadName: string;
@@ -52,21 +54,65 @@ export const SchoolFeesCollectView = ({
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const [student, setStudent] = useState<Student | null>(null);
+  const [search, setSearch] = useState("");
   const [academicYear, setAcademicYear] = useState(ACADEMIC_YEAR);
+  const [listPage, setListPage] = useState(1);
   const [selected, setSelected] = useState<Record<string, SelectedLine>>({});
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [paymentModal, setPaymentModal] = useState<PaymentModalState | null>(null);
   const [collectingKey, setCollectingKey] = useState<string | null>(null);
   const [collectingSummary, setCollectingSummary] = useState(false);
+  const [loadingStudentId, setLoadingStudentId] = useState<string | null>(null);
 
   const preselectId = searchParams.get("studentId");
 
+  const loadStudent = async (studentId: string): Promise<void> => {
+    setLoadingStudentId(studentId);
+    try {
+      const res = await api.get<{ data: Student }>(`/api/students/${studentId}`);
+      setStudent(res.data.data);
+      setSelected({});
+    } catch {
+      showToast("error", "Could not load student");
+    } finally {
+      setLoadingStudentId(null);
+    }
+  };
+
   useEffect(() => {
     if (!preselectId) return;
-    api.get<{ data: Student }>(`/api/students/${preselectId}`).then((res) => {
-      setStudent(res.data.data);
-    });
+    void loadStudent(preselectId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preselectId]);
+
+  useEffect(() => {
+    setListPage(1);
+  }, [search, academicYear]);
+
+  const outstandingQuery = useQuery({
+    queryKey: ["school-fees-outstanding-collect", { listPage, academicYear }],
+    queryFn: async () =>
+      (
+        await api.get<PaginatedResponse<OutstandingStudent>>("/api/school-fees/outstanding", {
+          params: {
+            academicYear,
+            page: listPage,
+            limit: 50
+          }
+        })
+      ).data,
+    placeholderData: keepPreviousData
+  });
+
+  const filteredRows = useMemo(() => {
+    const rows = outstandingQuery.data?.data ?? [];
+    const q = search.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter(
+      (row) =>
+        row.studentName.toLowerCase().includes(q) || row.grade.toLowerCase().includes(q)
+    );
+  }, [outstandingQuery.data, search]);
 
   const ledgerQuery = useQuery({
     queryKey: ["school-fee-ledger", student?._id, academicYear],
@@ -154,13 +200,14 @@ export const SchoolFeesCollectView = ({
 
   const handlePaymentSuccess = (receiptNumber: string): void => {
     queryClient.invalidateQueries({ queryKey: ["school-fee-ledger"] });
+    queryClient.invalidateQueries({ queryKey: ["school-fees-outstanding-collect"] });
     setSelected({});
     showToast("success", `Payment recorded — ${receiptNumber}`);
     setPaymentModal(null);
     window.open(`${receiptBasePath}/${receiptNumber}`, "_blank");
   };
 
-  const toggleRow = (row: (typeof flatPeriods)[0], checked: boolean) => {
+  const toggleRow = (row: (typeof flatPeriods)[0], checked: boolean): void => {
     if (!checked) {
       setSelected((prev) => {
         const next = { ...prev };
@@ -189,18 +236,18 @@ export const SchoolFeesCollectView = ({
     ledger?.student?.bus && typeof ledger.student.bus === "object"
       ? ledger.student.bus.busNumber
       : "";
+  const listPagination = outstandingQuery.data?.pagination;
 
   return (
     <div className="space-y-4">
       <Card>
-        <StudentSearch
-          onSelect={(s) => {
-            setStudent(s);
-            setSelected({});
-          }}
-          placeholder="Search student by name to collect fees..."
-        />
-        <div className="mt-2 flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Filter by student name or grade..."
+            className="min-w-[220px] flex-1 rounded border border-slate-200 px-3 py-2 text-sm"
+          />
           <select
             value={academicYear}
             onChange={(e) => setAcademicYear(e.target.value)}
@@ -209,6 +256,66 @@ export const SchoolFeesCollectView = ({
             <option value={ACADEMIC_YEAR}>{ACADEMIC_YEAR}</option>
           </select>
         </div>
+        <p className="mt-2 text-sm text-slate-600">
+          {listPagination?.total ?? 0} students with outstanding school fees
+          {search.trim() ? ` · showing ${filteredRows.length} matches on this page` : ""}
+        </p>
+      </Card>
+
+      <Card>
+        {outstandingQuery.isLoading ? (
+          <TableSkeleton />
+        ) : filteredRows.length === 0 ? (
+          <p className="py-6 text-center text-sm text-slate-500">
+            {search.trim() ? "No students match your search." : "No outstanding school fees."}
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-[700px] w-full text-sm">
+              <thead className="text-left text-slate-500">
+                <tr>
+                  <th className="p-2">Student</th>
+                  <th>Grade</th>
+                  <th>Balance</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredRows.map((row) => (
+                  <tr
+                    key={row.studentId}
+                    className={`cursor-pointer border-t border-slate-100 hover:bg-primary-50 ${
+                      student?._id === row.studentId ? "bg-primary-50/60" : ""
+                    }`}
+                    onClick={() => void loadStudent(row.studentId)}
+                  >
+                    <td className="p-2 font-medium">{row.studentName}</td>
+                    <td>{row.grade}</td>
+                    <td className="font-semibold text-rose-600">{formatINR(row.balance)}</td>
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        className="border-primary text-primary hover:bg-primary-50"
+                        disabled={loadingStudentId === row.studentId}
+                        onClick={() => void loadStudent(row.studentId)}
+                      >
+                        {loadingStudentId === row.studentId ? "..." : "Collect"}
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {listPagination && !search.trim() && (
+          <ListPagination
+            pagination={listPagination}
+            noun="students"
+            onPageChange={setListPage}
+          />
+        )}
       </Card>
 
       {student && (
@@ -299,7 +406,7 @@ export const SchoolFeesCollectView = ({
                               <Button
                                 variant="secondary"
                                 disabled={collectingKey === row.key}
-                                onClick={() => openPaymentModal(row)}
+                                onClick={() => void openPaymentModal(row)}
                               >
                                 {collectingKey === row.key ? "..." : "Collect"}
                               </Button>

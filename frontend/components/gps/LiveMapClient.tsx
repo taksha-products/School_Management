@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { MapContainer, TileLayer } from "react-leaflet";
+import { MapContainer, TileLayer, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -31,6 +31,9 @@ interface LeafletDefaultIconPrototype {
   _getIconUrl?: () => string;
 }
 
+const BANGALORE_CENTER: [number, number] = [12.9716, 77.5946];
+const FALLBACK_ZOOM = 12;
+
 // Leaflet default marker paths (tiles use OSM; markers for any default icons)
 const iconPrototype = L.Icon.Default.prototype as LeafletDefaultIconPrototype;
 delete iconPrototype._getIconUrl;
@@ -57,6 +60,21 @@ const toMapEntry = (row: LiveBusApiRow): BusMapEntry | null => {
     accuracy: 0,
     timestamp: row.lastSeen ?? new Date().toISOString()
   };
+};
+
+const MapFitBounds = ({ positions }: { positions: [number, number][] }): null => {
+  const map = useMap();
+
+  useEffect(() => {
+    if (positions.length > 0) {
+      const bounds = L.latLngBounds(positions);
+      map.fitBounds(bounds, { padding: [48, 48], maxZoom: 15 });
+      return;
+    }
+    map.setView(BANGALORE_CENTER, FALLBACK_ZOOM);
+  }, [map, positions]);
+
+  return null;
 };
 
 export const LiveMapClient = (): JSX.Element => {
@@ -98,6 +116,13 @@ export const LiveMapClient = (): JSX.Element => {
   }, [initialPositions, livePositions]);
 
   const busCount = displayedBuses.size;
+  const fitPositions = useMemo(
+    () =>
+      Array.from(displayedBuses.values()).map(
+        (bus) => [bus.lat, bus.lng] as [number, number]
+      ),
+    [displayedBuses]
+  );
 
   return (
     <div className="relative min-h-[calc(100vh-10rem)] flex-1">
@@ -120,8 +145,8 @@ export const LiveMapClient = (): JSX.Element => {
       )}
 
       <MapContainer
-        center={[20.5937, 78.9629]}
-        zoom={5}
+        center={BANGALORE_CENTER}
+        zoom={FALLBACK_ZOOM}
         className="h-[calc(100vh-10rem)] w-full rounded-xl border border-slate-200"
         scrollWheelZoom
       >
@@ -129,6 +154,7 @@ export const LiveMapClient = (): JSX.Element => {
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
+        <MapFitBounds positions={fitPositions} />
         {Array.from(displayedBuses.values()).map((bus) => (
           <BusMarker
             key={bus.busId}

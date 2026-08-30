@@ -1,7 +1,7 @@
 import type { JSX, ReactNode } from "react";
 
 interface PageWrapperProps {
-  title: string;
+  title: ReactNode;
   subtitle?: string;
   children: ReactNode;
   action?: ReactNode;

@@ -3,8 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useParams } from "next/navigation";
 
-import { Bus } from "lucide-react";
-
+import { ReceiptOrgHeader } from "@/components/shared/BrandLogo";
 import { Button } from "@/components/ui/Button";
 import { api } from "@/lib/api";
 import { formatINR } from "@/lib/utils";
@@ -68,15 +67,7 @@ const ReceiptPage = (): JSX.Element => {
     <div className="mx-auto flex min-h-screen w-full max-w-2xl flex-col items-center justify-center bg-gray-50 p-6 print:bg-white">
       <div className="w-full max-w-[520px] rounded-2xl border border-gray-200 bg-white p-8 text-gray-900 shadow-md print:border-0 print:shadow-none">
         <div className="mb-5 flex items-start justify-between gap-4">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary">
-              <Bus className="h-4 w-4 text-white" strokeWidth={2.5} />
-            </div>
-            <div>
-              <h1 className="text-lg font-bold text-gray-900">BusTrack</h1>
-              <p className="text-xs text-gray-500">Transport Fee Receipt</p>
-            </div>
-          </div>
+          <ReceiptOrgHeader subtitle="Transport Fee Receipt" />
           <div className="text-right">
             <p className="text-xs font-medium uppercase tracking-wide text-gray-400">Receipt</p>
             <p className="text-sm font-semibold text-gray-700">{receipt?.receiptNumber ?? "-"}</p>

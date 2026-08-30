@@ -20,6 +20,7 @@ const StudentFeeAssignment_1 = require("../models/StudentFeeAssignment");
 const asyncHandler_1 = require("../utils/asyncHandler");
 const excelParser_1 = require("../utils/excelParser");
 const orgFilter_1 = require("../utils/orgFilter");
+const orgGradeConfig_1 = require("../utils/orgGradeConfig");
 const schoolFeeLedger_1 = require("../utils/schoolFeeLedger");
 const schoolFeeService_1 = require("../services/schoolFeeService");
 const bulkRouter = (0, express_1.Router)();
@@ -31,31 +32,22 @@ const bulkGuard = [
     (0, featureFlag_1.requireFeature)("bulkOperations"),
     (0, roleCheck_1.isOrgAdminOrStaff)("canManageStudents")
 ];
-const validGrades = new Set([
-    "1",
-    "2",
-    "3",
-    "4",
-    "5",
-    "6",
-    "7",
-    "8",
-    "9",
-    "10",
-    "11",
-    "12",
-    "KG1",
-    "KG2",
-    "Nursery"
-]);
-const studentTemplateHeaders = [
-    { key: "name", header: "Name", example: "Rahul Sharma" },
-    { key: "grade", header: "Grade", example: "6" },
-    { key: "parentName", header: "Parent Name", example: "Suresh Sharma" },
-    { key: "parentPhone", header: "Parent Phone", example: "9876543210" },
-    { key: "address", header: "Address", example: "123 MG Road, Bengaluru" },
-    { key: "academicYear", header: "Academic Year", example: "2025-26" }
-];
+const buildStudentTemplateHeaders = (orgConfig) => {
+    const gradeExample = orgConfig.grades[0]?.label ?? "6";
+    const includeSection = (0, orgGradeConfig_1.orgHasAnySections)(orgConfig);
+    const headers = [
+        { key: "name", header: "Name", example: "Rahul Sharma" },
+        { key: "grade", header: "Grade", example: gradeExample },
+        ...(includeSection
+            ? [{ key: "section", header: "Section", example: orgConfig.grades[0]?.sections[0] ?? "A" }]
+            : []),
+        { key: "parentName", header: "Parent Name", example: "Suresh Sharma" },
+        { key: "parentPhone", header: "Parent Phone", example: "9876543210" },
+        { key: "address", header: "Address", example: "123 MG Road, Bengaluru" },
+        { key: "academicYear", header: "Academic Year", example: "2025-26" }
+    ];
+    return headers;
+};
 const transportTemplateHeaders = [
     { key: "studentName", header: "Student Name", example: "Rahul Sharma" },
     { key: "grade", header: "Grade", example: "6" },
@@ -76,9 +68,18 @@ const runUploadMemory = (req, res) => new Promise((resolve, reject) => {
         resolve();
     });
 });
-const parseStudentImportRow = (row, rowNumber) => {
+const getOrgGradeConfigById = async (orgId) => {
+    const org = await Organization_1.Organization.findById(orgId).select("institutionType grades");
+    if (!org) {
+        throw new Error("Organization not found");
+    }
+    return (0, orgGradeConfig_1.resolveOrgGradeConfig)(org);
+};
+const parseStudentImportRow = (row, rowNumber, orgConfig) => {
+    const validGrades = (0, orgGradeConfig_1.buildValidGradeSet)(orgConfig.grades);
     const name = trimString(row.Name);
     const grade = trimString(row.Grade);
+    const section = trimString(row.Section);
     const parentName = trimString(row["Parent Name"]);
     const parentPhone = trimString(row["Parent Phone"]);
     const address = trimString(row.Address);
@@ -87,7 +88,19 @@ const parseStudentImportRow = (row, rowNumber) => {
         throw new Error("Name is required and must be less than 100 characters");
     }
     if (!grade || !validGrades.has(grade)) {
-        throw new Error("Grade must be one of 1-12, KG1, KG2, Nursery");
+        throw new Error((0, orgGradeConfig_1.formatGradeValidationMessage)(orgConfig.grades));
+    }
+    const gradeSections = (0, orgGradeConfig_1.getSectionsForGrade)(orgConfig, grade);
+    if (gradeSections.length > 0) {
+        if (!section) {
+            throw new Error(`Section is required for grade ${grade}`);
+        }
+        if (!gradeSections.includes(section)) {
+            throw new Error((0, orgGradeConfig_1.formatSectionValidationMessage)(gradeSections));
+        }
+    }
+    else if (section) {
+        throw new Error(`Section is not used for grade ${grade}`);
     }
     if (!parentName) {
         throw new Error("Parent Name is required");
@@ -102,13 +115,15 @@ const parseStudentImportRow = (row, rowNumber) => {
         row: rowNumber,
         name,
         grade,
+        section: gradeSections.length > 0 ? section : undefined,
         parentName,
         parentPhone,
         address: address || undefined,
         academicYear
     };
 };
-const parseTransportImportRow = (row, rowNumber, busMap) => {
+const parseTransportImportRow = (row, rowNumber, busMap, orgConfig) => {
+    const validGrades = (0, orgGradeConfig_1.buildValidGradeSet)(orgConfig.grades);
     const studentName = trimString(row["Student Name"]);
     const grade = trimString(row.Grade);
     const busNumber = trimString(row["Bus Number"]);
@@ -120,7 +135,7 @@ const parseTransportImportRow = (row, rowNumber, busMap) => {
         throw new Error("Student Name is required");
     }
     if (!grade || !validGrades.has(grade)) {
-        throw new Error("Grade must be one of 1-12, KG1, KG2, Nursery");
+        throw new Error((0, orgGradeConfig_1.formatGradeValidationMessage)(orgConfig.grades));
     }
     if (!busNumber || !busMap.has(busNumber)) {
         throw new Error(busNumber ? `${busNumber} not found` : "Bus Number is required");
@@ -151,10 +166,13 @@ const parseTransportImportRow = (row, rowNumber, busMap) => {
 };
 const getOrgName = async (orgId) => {
     const org = await Organization_1.Organization.findById(orgId).select("name");
-    return org?.name ? `${org.name} (${toDateStamp()})` : `BusTrack Export (${toDateStamp()})`;
+    return org?.name ? `${org.name} (${toDateStamp()})` : `TAKSHA Export (${toDateStamp()})`;
 };
-bulkRouter.get("/templates/students", (0, asyncHandler_1.asyncHandler)(async (_req, res) => {
-    const file = (0, excelParser_1.generateTemplate)(studentTemplateHeaders, "Students Template");
+bulkRouter.get("/templates/students", ...bulkGuard, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    const authReq = req;
+    const orgId = (0, orgFilter_1.getScopedOrganizationId)(authReq, res);
+    const orgConfig = await getOrgGradeConfigById(orgId);
+    const file = (0, excelParser_1.generateTemplate)(buildStudentTemplateHeaders(orgConfig), "Students Template");
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.setHeader("Content-Disposition", 'attachment; filename="student_upload_template.xlsx"');
     res.send(file);
@@ -167,7 +185,8 @@ bulkRouter.post("/students/preview", ...bulkGuard, (0, asyncHandler_1.asyncHandl
         return;
     }
     const orgId = (0, orgFilter_1.getScopedOrganizationId)(authReq, res);
-    const parsed = (0, excelParser_1.parseExcelBuffer)(authReq.file.buffer, (row, rowIndex) => parseStudentImportRow(row, rowIndex));
+    const orgConfig = await getOrgGradeConfigById(orgId);
+    const parsed = (0, excelParser_1.parseExcelBuffer)(authReq.file.buffer, (row, rowIndex) => parseStudentImportRow(row, rowIndex, orgConfig));
     const existingStudents = await Student_1.Student.find({
         organizationId: new mongoose_1.Types.ObjectId(orgId)
     }).select("name grade");
@@ -228,6 +247,7 @@ bulkRouter.post("/students/confirm", ...bulkGuard, (0, asyncHandler_1.asyncHandl
         });
         return;
     }
+    const orgConfig = await getOrgGradeConfigById(orgId);
     const eligibleRows = rows.filter((row) => row.status === "valid" || (!skipWarnings && row.status === "warning"));
     const failures = [];
     const toInsert = eligibleRows
@@ -236,15 +256,17 @@ bulkRouter.post("/students/confirm", ...bulkGuard, (0, asyncHandler_1.asyncHandl
             const validated = parseStudentImportRow({
                 Name: row.name,
                 Grade: row.grade,
+                Section: row.section ?? "",
                 "Parent Name": row.parentName,
                 "Parent Phone": row.parentPhone,
                 Address: row.address ?? "",
                 "Academic Year": academicYear
-            }, row.row);
+            }, row.row, orgConfig);
             return {
                 organizationId: new mongoose_1.Types.ObjectId(orgId),
                 name: validated.name,
                 grade: validated.grade,
+                section: validated.section,
                 parentName: validated.parentName,
                 parentPhone: validated.parentPhone,
                 address: validated.address,
@@ -444,12 +466,13 @@ bulkRouter.post("/transport/preview", ...bulkGuard, (0, asyncHandler_1.asyncHand
         return;
     }
     const orgId = (0, orgFilter_1.getScopedOrganizationId)(authReq, res);
+    const orgConfig = await getOrgGradeConfigById(orgId);
     const buses = await Bus_1.Bus.find({
         organizationId: new mongoose_1.Types.ObjectId(orgId),
         status: "active"
     }).select("busNumber");
     const busMap = new Map(buses.map((bus) => [bus.busNumber, bus._id.toString()]));
-    const parsed = (0, excelParser_1.parseExcelBuffer)(authReq.file.buffer, (row, rowIndex) => parseTransportImportRow(row, rowIndex, busMap));
+    const parsed = (0, excelParser_1.parseExcelBuffer)(authReq.file.buffer, (row, rowIndex) => parseTransportImportRow(row, rowIndex, busMap, orgConfig));
     const orgStudents = await Student_1.Student.find({
         organizationId: new mongoose_1.Types.ObjectId(orgId),
         status: "active"
@@ -796,7 +819,7 @@ bulkRouter.get("/export/students", ...bulkGuard, (0, asyncHandler_1.asyncHandler
     ];
     const file = (0, excelParser_1.generateTemplate)(headers, "Students", rows, await getOrgName(orgId));
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-    res.setHeader("Content-Disposition", `attachment; filename="bustrack_students_${toDateStamp()}.xlsx"`);
+    res.setHeader("Content-Disposition", `attachment; filename="taksha_students_${toDateStamp()}.xlsx"`);
     res.send(file);
 }));
 bulkRouter.get("/export/fees", ...bulkGuard, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
@@ -841,7 +864,7 @@ bulkRouter.get("/export/fees", ...bulkGuard, (0, asyncHandler_1.asyncHandler)(as
     ];
     const file = (0, excelParser_1.generateTemplate)(headers, "Bus Fees", rows, await getOrgName(orgId));
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-    res.setHeader("Content-Disposition", `attachment; filename="bustrack_fees_${toDateStamp()}.xlsx"`);
+    res.setHeader("Content-Disposition", `attachment; filename="taksha_fees_${toDateStamp()}.xlsx"`);
     res.send(file);
 }));
 bulkRouter.get("/export/school-fees-outstanding", ...bulkGuard, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
@@ -889,7 +912,7 @@ bulkRouter.get("/export/school-fees-outstanding", ...bulkGuard, (0, asyncHandler
     ];
     const file = (0, excelParser_1.generateTemplate)(headers, "School Fees Outstanding", rows, await getOrgName(orgId));
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-    res.setHeader("Content-Disposition", `attachment; filename="bustrack_school_fees_outstanding_${toDateStamp()}.xlsx"`);
+    res.setHeader("Content-Disposition", `attachment; filename="taksha_school_fees_outstanding_${toDateStamp()}.xlsx"`);
     res.send(file);
 }));
 bulkRouter.get("/export/expenses", ...bulkGuard, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
@@ -933,7 +956,7 @@ bulkRouter.get("/export/expenses", ...bulkGuard, (0, asyncHandler_1.asyncHandler
     ];
     const file = (0, excelParser_1.generateTemplate)(headers, "Expenses", rows, await getOrgName(orgId));
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-    res.setHeader("Content-Disposition", `attachment; filename="bustrack_expenses_${toDateStamp()}.xlsx"`);
+    res.setHeader("Content-Disposition", `attachment; filename="taksha_expenses_${toDateStamp()}.xlsx"`);
     res.send(file);
 }));
 exports.default = bulkRouter;

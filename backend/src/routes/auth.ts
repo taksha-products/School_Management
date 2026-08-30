@@ -7,6 +7,7 @@ import { auth, type AuthenticatedRequest } from "../middleware/auth";
 import { blockSuperAdmin2FADisable } from "../middleware/require2FA";
 import { validate } from "../middleware/validate";
 import { Organization } from "../models/Organization";
+import { getOrgBrandingLabel } from "../services/orgThemeService";
 import { getRefreshTokenExpiry, RefreshToken } from "../models/RefreshToken";
 import { User, type IUser } from "../models/User";
 import { asyncHandler } from "../utils/asyncHandler";
@@ -126,10 +127,9 @@ const issueSession = async (
 
 const getOrganizationName = async (user: IUser): Promise<string> => {
   if (!user.organizationId) {
-    return "BusTrack";
+    return "TAKSHA";
   }
-  const organization = await Organization.findById(user.organizationId);
-  return organization?.name ?? "BusTrack";
+  return getOrgBrandingLabel(user.organizationId.toString());
 };
 
 const logSuspiciousEvent = (

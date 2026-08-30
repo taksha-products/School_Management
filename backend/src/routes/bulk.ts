@@ -20,6 +20,15 @@ import { StudentFeeAssignment } from "../models/StudentFeeAssignment";
 import { asyncHandler } from "../utils/asyncHandler";
 import { generateTemplate, parseExcelBuffer, type TemplateHeader } from "../utils/excelParser";
 import { getScopedOrganizationId, orgFilter } from "../utils/orgFilter";
+import {
+  buildValidGradeSet,
+  formatGradeValidationMessage,
+  formatSectionValidationMessage,
+  getSectionsForGrade,
+  orgHasAnySections,
+  resolveOrgGradeConfig,
+  type OrgGradeConfig
+} from "../utils/orgGradeConfig";
 import { assignFeeStructureToStudents } from "../utils/schoolFeeLedger";
 import {
   buildStudentFeeStatusMapsByYear,
@@ -38,32 +47,22 @@ const bulkGuard = [
   isOrgAdminOrStaff("canManageStudents")
 ] as const;
 
-const validGrades = new Set([
-  "1",
-  "2",
-  "3",
-  "4",
-  "5",
-  "6",
-  "7",
-  "8",
-  "9",
-  "10",
-  "11",
-  "12",
-  "KG1",
-  "KG2",
-  "Nursery"
-]);
-
-const studentTemplateHeaders: TemplateHeader[] = [
-  { key: "name", header: "Name", example: "Rahul Sharma" },
-  { key: "grade", header: "Grade", example: "6" },
-  { key: "parentName", header: "Parent Name", example: "Suresh Sharma" },
-  { key: "parentPhone", header: "Parent Phone", example: "9876543210" },
-  { key: "address", header: "Address", example: "123 MG Road, Bengaluru" },
-  { key: "academicYear", header: "Academic Year", example: "2025-26" }
-];
+const buildStudentTemplateHeaders = (orgConfig: OrgGradeConfig): TemplateHeader[] => {
+  const gradeExample = orgConfig.grades[0]?.label ?? "6";
+  const includeSection = orgHasAnySections(orgConfig);
+  const headers: TemplateHeader[] = [
+    { key: "name", header: "Name", example: "Rahul Sharma" },
+    { key: "grade", header: "Grade", example: gradeExample },
+    ...(includeSection
+      ? [{ key: "section", header: "Section", example: orgConfig.grades[0]?.sections[0] ?? "A" }]
+      : []),
+    { key: "parentName", header: "Parent Name", example: "Suresh Sharma" },
+    { key: "parentPhone", header: "Parent Phone", example: "9876543210" },
+    { key: "address", header: "Address", example: "123 MG Road, Bengaluru" },
+    { key: "academicYear", header: "Academic Year", example: "2025-26" }
+  ];
+  return headers;
+};
 
 const transportTemplateHeaders: TemplateHeader[] = [
   { key: "studentName", header: "Student Name", example: "Rahul Sharma" },
@@ -79,6 +78,7 @@ type PreviewRow = {
   row: number;
   name: string;
   grade: string;
+  section?: string;
   parentName: string;
   parentPhone: string;
   address?: string;
@@ -115,9 +115,24 @@ const runUploadMemory = (req: Request, res: Response): Promise<void> =>
     });
   });
 
-const parseStudentImportRow = (row: Record<string, unknown>, rowNumber: number) => {
+const getOrgGradeConfigById = async (orgId: string): Promise<OrgGradeConfig> => {
+  const org = await Organization.findById(orgId).select("institutionType grades");
+  if (!org) {
+    throw new Error("Organization not found");
+  }
+  return resolveOrgGradeConfig(org);
+};
+
+const parseStudentImportRow = (
+  row: Record<string, unknown>,
+  rowNumber: number,
+  orgConfig: OrgGradeConfig
+) => {
+  const validGrades = buildValidGradeSet(orgConfig.grades);
+
   const name = trimString(row.Name);
   const grade = trimString(row.Grade);
+  const section = trimString(row.Section);
   const parentName = trimString(row["Parent Name"]);
   const parentPhone = trimString(row["Parent Phone"]);
   const address = trimString(row.Address);
@@ -127,7 +142,19 @@ const parseStudentImportRow = (row: Record<string, unknown>, rowNumber: number) 
     throw new Error("Name is required and must be less than 100 characters");
   }
   if (!grade || !validGrades.has(grade)) {
-    throw new Error("Grade must be one of 1-12, KG1, KG2, Nursery");
+    throw new Error(formatGradeValidationMessage(orgConfig.grades));
+  }
+
+  const gradeSections = getSectionsForGrade(orgConfig, grade);
+  if (gradeSections.length > 0) {
+    if (!section) {
+      throw new Error(`Section is required for grade ${grade}`);
+    }
+    if (!gradeSections.includes(section)) {
+      throw new Error(formatSectionValidationMessage(gradeSections));
+    }
+  } else if (section) {
+    throw new Error(`Section is not used for grade ${grade}`);
   }
   if (!parentName) {
     throw new Error("Parent Name is required");
@@ -143,6 +170,7 @@ const parseStudentImportRow = (row: Record<string, unknown>, rowNumber: number) 
     row: rowNumber,
     name,
     grade,
+    section: gradeSections.length > 0 ? section : undefined,
     parentName,
     parentPhone,
     address: address || undefined,
@@ -153,8 +181,11 @@ const parseStudentImportRow = (row: Record<string, unknown>, rowNumber: number) 
 const parseTransportImportRow = (
   row: Record<string, unknown>,
   rowNumber: number,
-  busMap: Map<string, string>
+  busMap: Map<string, string>,
+  orgConfig: OrgGradeConfig
 ) => {
+  const validGrades = buildValidGradeSet(orgConfig.grades);
+
   const studentName = trimString(row["Student Name"]);
   const grade = trimString(row.Grade);
   const busNumber = trimString(row["Bus Number"]);
@@ -167,7 +198,7 @@ const parseTransportImportRow = (
     throw new Error("Student Name is required");
   }
   if (!grade || !validGrades.has(grade)) {
-    throw new Error("Grade must be one of 1-12, KG1, KG2, Nursery");
+    throw new Error(formatGradeValidationMessage(orgConfig.grades));
   }
   if (!busNumber || !busMap.has(busNumber)) {
     throw new Error(busNumber ? `${busNumber} not found` : "Bus Number is required");
@@ -202,21 +233,28 @@ const parseTransportImportRow = (
 
 const getOrgName = async (orgId: string): Promise<string> => {
   const org = await Organization.findById(orgId).select("name");
-  return org?.name ? `${org.name} (${toDateStamp()})` : `BusTrack Export (${toDateStamp()})`;
+  return org?.name ? `${org.name} (${toDateStamp()})` : `TAKSHA Export (${toDateStamp()})`;
 };
 
-bulkRouter.get("/templates/students", asyncHandler(async (_req, res) => {
-  const file = generateTemplate(studentTemplateHeaders, "Students Template");
-  res.setHeader(
-    "Content-Type",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-  );
-  res.setHeader(
-    "Content-Disposition",
-    'attachment; filename="student_upload_template.xlsx"'
-  );
-  res.send(file);
-}));
+bulkRouter.get(
+  "/templates/students",
+  ...bulkGuard,
+  asyncHandler(async (req, res) => {
+    const authReq = req as AuthenticatedRequest;
+    const orgId = getScopedOrganizationId(authReq, res)!;
+    const orgConfig = await getOrgGradeConfigById(orgId);
+    const file = generateTemplate(buildStudentTemplateHeaders(orgConfig), "Students Template");
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader(
+      "Content-Disposition",
+      'attachment; filename="student_upload_template.xlsx"'
+    );
+    res.send(file);
+  })
+);
 
 bulkRouter.post(
   "/students/preview",
@@ -230,9 +268,10 @@ bulkRouter.post(
     }
 
     const orgId = getScopedOrganizationId(authReq, res)!;
+    const orgConfig = await getOrgGradeConfigById(orgId);
 
     const parsed = parseExcelBuffer(authReq.file.buffer, (row, rowIndex) =>
-      parseStudentImportRow(row, rowIndex)
+      parseStudentImportRow(row, rowIndex, orgConfig)
     );
 
     const existingStudents = await Student.find({
@@ -314,6 +353,8 @@ bulkRouter.post(
       return;
     }
 
+    const orgConfig = await getOrgGradeConfigById(orgId);
+
     const eligibleRows = rows.filter(
       (row) => row.status === "valid" || (!skipWarnings && row.status === "warning")
     );
@@ -326,17 +367,20 @@ bulkRouter.post(
             {
               Name: row.name,
               Grade: row.grade,
+              Section: row.section ?? "",
               "Parent Name": row.parentName,
               "Parent Phone": row.parentPhone,
               Address: row.address ?? "",
               "Academic Year": academicYear
             },
-            row.row
+            row.row,
+            orgConfig
           );
           return {
             organizationId: new Types.ObjectId(orgId),
             name: validated.name,
             grade: validated.grade,
+            section: validated.section,
             parentName: validated.parentName,
             parentPhone: validated.parentPhone,
             address: validated.address,
@@ -593,6 +637,7 @@ bulkRouter.post(
     }
 
     const orgId = getScopedOrganizationId(authReq, res)!;
+    const orgConfig = await getOrgGradeConfigById(orgId);
     const buses = await Bus.find({
       organizationId: new Types.ObjectId(orgId),
       status: "active"
@@ -600,7 +645,7 @@ bulkRouter.post(
     const busMap = new Map<string, string>(buses.map((bus) => [bus.busNumber, bus._id.toString()]));
 
     const parsed = parseExcelBuffer(authReq.file.buffer, (row, rowIndex) =>
-      parseTransportImportRow(row, rowIndex, busMap)
+      parseTransportImportRow(row, rowIndex, busMap, orgConfig)
     );
 
     const orgStudents = await Student.find({
@@ -1074,7 +1119,7 @@ bulkRouter.get(
     const file = generateTemplate(headers, "Students", rows, await getOrgName(orgId));
 
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-    res.setHeader("Content-Disposition", `attachment; filename="bustrack_students_${toDateStamp()}.xlsx"`);
+    res.setHeader("Content-Disposition", `attachment; filename="taksha_students_${toDateStamp()}.xlsx"`);
     res.send(file);
   })
 );
@@ -1128,7 +1173,7 @@ bulkRouter.get(
 
     const file = generateTemplate(headers, "Bus Fees", rows, await getOrgName(orgId));
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-    res.setHeader("Content-Disposition", `attachment; filename="bustrack_fees_${toDateStamp()}.xlsx"`);
+    res.setHeader("Content-Disposition", `attachment; filename="taksha_fees_${toDateStamp()}.xlsx"`);
     res.send(file);
   })
 );
@@ -1184,7 +1229,7 @@ bulkRouter.get(
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="bustrack_school_fees_outstanding_${toDateStamp()}.xlsx"`
+      `attachment; filename="taksha_school_fees_outstanding_${toDateStamp()}.xlsx"`
     );
     res.send(file);
   })
@@ -1236,7 +1281,7 @@ bulkRouter.get(
 
     const file = generateTemplate(headers, "Expenses", rows, await getOrgName(orgId));
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-    res.setHeader("Content-Disposition", `attachment; filename="bustrack_expenses_${toDateStamp()}.xlsx"`);
+    res.setHeader("Content-Disposition", `attachment; filename="taksha_expenses_${toDateStamp()}.xlsx"`);
     res.send(file);
   })
 );

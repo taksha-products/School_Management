@@ -17,7 +17,7 @@ const TOTP_WINDOW = 1;
  */
 const generateSecret = (userEmail, organizationName) => {
     const generated = speakeasy_1.default.generateSecret({
-        name: `BusTrack:${userEmail}`,
+        name: `${organizationName}:${userEmail}`,
         issuer: organizationName,
         length: 20
     });
@@ -28,7 +28,7 @@ const generateSecret = (userEmail, organizationName) => {
     const otpauthUrl = generated.otpauth_url ??
         speakeasy_1.default.otpauthURL({
             secret,
-            label: `BusTrack:${userEmail}`,
+            label: `${organizationName}:${userEmail}`,
             issuer: organizationName,
             encoding: "base32"
         });

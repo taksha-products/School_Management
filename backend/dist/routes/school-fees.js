@@ -147,7 +147,7 @@ schoolFeesRouter.get("/ledger", ...scopeMiddleware, allowCollect, (0, asyncHandl
 schoolFeesRouter.get("/student-fee-status", ...scopeMiddleware, allowCollect, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     const authReq = req;
     const orgId = (0, orgFilter_1.getScopedOrganizationId)(authReq, res);
-    const { academicYear } = req.query;
+    const { academicYear, studentIds: studentIdsRaw } = req.query;
     if (!academicYear) {
         res.status(400).json({
             success: false,
@@ -156,7 +156,15 @@ schoolFeesRouter.get("/student-fee-status", ...scopeMiddleware, allowCollect, (0
         });
         return;
     }
-    const statusMap = await (0, schoolFeeService_1.buildStudentFeeStatusMap)(orgId, academicYear);
+    const studentIds = studentIdsRaw
+        ? studentIdsRaw
+            .split(",")
+            .map((id) => id.trim())
+            .filter((id) => id.length > 0)
+        : [];
+    const statusMap = studentIds.length > 0
+        ? await (0, schoolFeeService_1.buildStudentFeeStatusMapForStudents)(orgId, academicYear, studentIds)
+        : await (0, schoolFeeService_1.buildStudentFeeStatusMap)(orgId, academicYear);
     res.json({
         success: true,
         data: statusMap,

@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { TableSkeleton } from "@/components/ui/TableSkeleton";
 import { useToast } from "@/components/ui/Toast";
+import { useOrgConfig } from "@/hooks/useOrgConfig";
 import { api } from "@/lib/api";
 import { downloadFromApi, downloadCsv } from "@/lib/fileDownload";
 import type {
@@ -19,18 +20,41 @@ import type {
 
 const STEPS = ["Download & Upload", "Preview & Validate", "Import Results"];
 
-const templateColumns = [
-  { column: "Name", required: "Yes", format: "Text", example: "Rahul Sharma" },
-  { column: "Grade", required: "Yes", format: "1-12/KG1/KG2/Nursery", example: "6" },
-  { column: "Parent Name", required: "Yes", format: "Text", example: "Suresh Sharma" },
-  { column: "Parent Phone", required: "Yes", format: "10 digits", example: "9876543210" },
-  { column: "Address", required: "No", format: "Text", example: "123 MG Road, Bengaluru" },
-  { column: "Academic Year", required: "Yes", format: "YYYY-YY", example: "2025-26" }
-];
-
 const UploadStudentsPage = (): JSX.Element => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { showToast } = useToast();
+  const { config: orgConfig, gradeOptions, hasAnySections } = useOrgConfig();
+
+  const templateColumns = useMemo(() => {
+    const gradeFormat = gradeOptions.join(", ");
+    const sectionGrades = orgConfig?.grades.filter((grade) => grade.sections.length > 0) ?? [];
+    const columns = [
+      { column: "Name", required: "Yes", format: "Text", example: "Rahul Sharma" },
+      {
+        column: "Grade",
+        required: "Yes",
+        format: gradeFormat || "1–12",
+        example: gradeOptions[0] ?? "6"
+      },
+      ...(hasAnySections
+        ? [
+            {
+              column: "Section",
+              required: "When grade has sections",
+              format: sectionGrades
+                .map((grade) => `${grade.label}: ${grade.sections.join(", ")}`)
+                .join(" · "),
+              example: sectionGrades[0]?.sections[0] ?? "A"
+            }
+          ]
+        : []),
+      { column: "Parent Name", required: "Yes", format: "Text", example: "Suresh Sharma" },
+      { column: "Parent Phone", required: "Yes", format: "10 digits", example: "9876543210" },
+      { column: "Address", required: "No", format: "Text", example: "123 MG Road, Bengaluru" },
+      { column: "Academic Year", required: "Yes", format: "YYYY-YY", example: "2025-26" }
+    ];
+    return columns;
+  }, [gradeOptions, orgConfig, hasAnySections]);
 
   const [step, setStep] = useState(1);
   const [file, setFile] = useState<File | null>(null);
@@ -368,6 +392,7 @@ const UploadStudentsPage = (): JSX.Element => {
                           <th className="px-3 py-2">Row</th>
                           <th>Name</th>
                           <th>Grade</th>
+                          {hasAnySections && <th>Section</th>}
                           <th>Parent</th>
                           <th>Phone</th>
                         </tr>
@@ -378,6 +403,7 @@ const UploadStudentsPage = (): JSX.Element => {
                             <td className="px-3 py-2">{row.row}</td>
                             <td>{row.name}</td>
                             <td>{row.grade}</td>
+                            {hasAnySections && <td>{row.section ?? "—"}</td>}
                             <td>{row.parentName}</td>
                             <td>{row.parentPhone}</td>
                           </tr>

@@ -9,6 +9,7 @@ import { Card } from "@/components/ui/Card";
 import { TableSkeleton } from "@/components/ui/TableSkeleton";
 import { useToast } from "@/components/ui/Toast";
 import { api } from "@/lib/api";
+import { useOrgConfig } from "@/hooks/useOrgConfig";
 import type { Bus, Student } from "@/types";
 
 const ACADEMIC_YEAR = "2025-26";
@@ -16,6 +17,7 @@ const ACADEMIC_YEAR = "2025-26";
 const AssignBusesPage = (): JSX.Element => {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
+  const { gradeOptions } = useOrgConfig();
   const [gradeFilter, setGradeFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("active");
   const [transportBusFilter, setTransportBusFilter] = useState("");
@@ -146,7 +148,7 @@ const AssignBusesPage = (): JSX.Element => {
               className="rounded border px-3 py-2 text-sm"
             >
               <option value="">All grades</option>
-              {["Nursery", "KG1", "KG2", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"].map(
+              {gradeOptions.map(
                 (g) => (
                   <option key={g} value={g}>
                     Grade {g}
@@ -296,7 +298,7 @@ const AssignBusesPage = (): JSX.Element => {
                 className="rounded border px-3 py-2 text-sm"
               >
                 <option value="">Select grade</option>
-                {["Nursery", "KG1", "KG2", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"].map(
+                {gradeOptions.map(
                   (g) => (
                     <option key={g} value={g}>
                       Grade {g}

@@ -59,7 +59,7 @@ const seed = async (): Promise<void> => {
   const [superAdmin, orgAdmin, staff, parent] = await User.insertMany([
     {
       name: "Super Admin",
-      email: "super@bustrack.com",
+      email: "super@taksha.com",
       passwordHash: await bcrypt.hash("super123", 10),
       role: "superAdmin",
       organizationId: null,
@@ -346,7 +346,7 @@ const seed = async (): Promise<void> => {
   void transportByStudent;
 
   console.log("\n--- Seed credentials ---");
-  console.log("Super Admin: super@bustrack.com / super123");
+  console.log("Super Admin: super@taksha.com / super123");
   console.log("Org Admin:   admin@demoschool.com / admin123");
   console.log("Staff:       staff@demoschool.com / staff123");
   console.log("Parent:      parent@demoschool.com / parent123");

@@ -191,7 +191,7 @@ paymentsRouter.post("/create-upi-qr", ...staffPaymentGuard, (0, asyncHandler_1.a
         studentId,
         feePaymentId,
         paymentType: feeType,
-        source: "bustrack_office"
+        source: "taksha_office"
     };
     if (feeType === "school") {
         notes.schoolFeePaymentId = feePaymentId;

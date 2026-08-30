@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { useToast } from "@/components/ui/Toast";
+import { useOrgTheme } from "@/hooks/useOrgTheme";
 import { useRazorpay, type RazorpayResponse } from "@/hooks/useRazorpay";
 import { ACADEMIC_YEAR } from "@/lib/constants";
 import { api } from "@/lib/api";
@@ -37,6 +38,7 @@ const ChildFeesPage = (): JSX.Element => {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const { isLoaded, openCheckout } = useRazorpay();
+  const { displayLabel, brandColor } = useOrgTheme();
   const [tab, setTab] = useState<"dues" | "history">("dues");
   const [payingKey, setPayingKey] = useState<string | null>(null);
   const [lastReceipt, setLastReceipt] = useState<string | null>(null);
@@ -126,9 +128,9 @@ const ChildFeesPage = (): JSX.Element => {
         amount: order.amount,
         currency: order.currency,
         order_id: order.orderId,
-        name: "BusTrack",
+        name: displayLabel,
         description: intent.description,
-        theme: { color: "#ea580c" },
+        theme: { color: brandColor },
         prefill: {
           name: user?.name,
           email: user?.email,

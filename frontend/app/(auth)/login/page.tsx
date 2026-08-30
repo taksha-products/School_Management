@@ -27,9 +27,9 @@ type LoginForm = z.infer<typeof loginSchema>;
 type TwoFactorForm = z.infer<typeof twoFactorSchema>;
 
 const features = [
-  "Bus fee & school fee tracking",
-  "Multi-role access control",
-  "Real-time financial reports"
+  "Student & transport management",
+  "Fee collection & tracking",
+  "Real-time GPS tracking"
 ] as const;
 
 const LoginPage = (): JSX.Element => {
@@ -140,9 +140,9 @@ const LoginPage = (): JSX.Element => {
           <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-white/15">
             <BusFront className="h-10 w-10 text-white" strokeWidth={1.5} />
           </div>
-          <h1 className="text-[32px] font-bold">BusTrack</h1>
+          <h1 className="text-[32px] font-bold">TAKSHA</h1>
           <p className="mt-2 text-sm text-white/85">
-            School transport &amp; fees management
+            School management platform
           </p>
           <ul className="mt-10 space-y-4 text-left text-sm text-white/90">
             {features.map((text) => (
@@ -161,7 +161,7 @@ const LoginPage = (): JSX.Element => {
             <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary">
               <BusFront className="h-5 w-5 text-white" />
             </div>
-            <span className="text-xl font-bold text-gray-900">BusTrack</span>
+            <span className="text-xl font-bold text-gray-900">TAKSHA</span>
           </div>
 
           {step === "credentials" ? (
@@ -292,10 +292,6 @@ const LoginPage = (): JSX.Element => {
             </>
           )}
 
-          <p className="mt-8 text-center text-xs text-gray-400">
-            Demo: super@bustrack.com · admin@demoschool.com · staff@demoschool.com ·
-            parent@demoschool.com
-          </p>
         </div>
       </div>
     </div>
