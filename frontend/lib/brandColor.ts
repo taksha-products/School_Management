@@ -64,3 +64,6 @@ export const getOrgDisplayLabel = (theme: {
   displayName?: string | null;
   orgName?: string;
 }): string => theme.displayName?.trim() || theme.orgName || "School";
+
+export const mixBrandColorWithWhite = (hex: string, whiteRatio: number): string =>
+  mixWithWhite(normalizeBrandColor(hex), whiteRatio);

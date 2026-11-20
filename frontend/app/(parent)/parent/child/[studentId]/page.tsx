@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 
+import { useAcademicYear } from "@/hooks/useAcademicYear";
 import { ReceiptDownload } from "@/components/payments/ReceiptDownload";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -12,7 +13,6 @@ import { Card } from "@/components/ui/Card";
 import { useToast } from "@/components/ui/Toast";
 import { useOrgTheme } from "@/hooks/useOrgTheme";
 import { useRazorpay, type RazorpayResponse } from "@/hooks/useRazorpay";
-import { ACADEMIC_YEAR } from "@/lib/constants";
 import { api } from "@/lib/api";
 import { getUser } from "@/lib/auth";
 import {
@@ -34,6 +34,7 @@ interface DueItem {
 }
 
 const ChildFeesPage = (): JSX.Element => {
+  const orgAcademicYear = useAcademicYear();
   const params = useParams<{ studentId: string }>();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
@@ -49,7 +50,7 @@ const ChildFeesPage = (): JSX.Element => {
       (
         await api.get<{ data: StudentFeeLedgerView }>(
           `/api/parent/children/${params.studentId}/fees`,
-          { params: { academicYear: ACADEMIC_YEAR } }
+          { params: { academicYear: orgAcademicYear } }
         )
       ).data.data
   });
@@ -60,7 +61,7 @@ const ChildFeesPage = (): JSX.Element => {
       (
         await api.get<{ data: StudentFeeLedgerView["paymentHistory"] }>(
           `/api/parent/children/${params.studentId}/payments`,
-          { params: { academicYear: ACADEMIC_YEAR } }
+          { params: { academicYear: orgAcademicYear } }
         )
       ).data.data,
     enabled: tab === "history"
@@ -104,7 +105,7 @@ const ChildFeesPage = (): JSX.Element => {
       const lateFee = item.status === "overdue" ? Math.round(item.balance * 0.02) : 0;
       const intent = await createSchoolPaymentIntent(
         params.studentId,
-        ACADEMIC_YEAR,
+        orgAcademicYear,
         [
           {
             feeHeadName: item.feeHeadName,

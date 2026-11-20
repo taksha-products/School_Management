@@ -12,9 +12,12 @@ import {
 } from "../middleware/roleCheck";
 import { FeeGroup } from "../models/FeeGroup";
 import { FeePayment, type FeePaymentStatus } from "../models/FeePayment";
+import { SchoolFeePayment } from "../models/SchoolFeePayment";
 import { Student } from "../models/Student";
 import { StudentTransport } from "../models/StudentTransport";
 import { asyncHandler } from "../utils/asyncHandler";
+import { PAYMENT_MODE_VALUES, type PaymentMode } from "../types/payment";
+import { getOrgReceiptBranding } from "../services/orgThemeService";
 import { invalidateOrgReportsCache } from "../utils/cache";
 import { getScopedOrganizationId, orgFilter } from "../utils/orgFilter";
 import { paginate, parsePaginationQuery } from "../utils/paginate";
@@ -29,6 +32,22 @@ const monthKeyNow = (): string => new Date().toISOString().slice(0, 7);
 
 const sortMonths = (months: string[]): string[] =>
   [...new Set(months)].sort((a, b) => a.localeCompare(b));
+
+const addCalendarMonths = (monthKey: string, offset: number): string => {
+  const [yearStr, monthStr] = monthKey.split("-");
+  const date = new Date(Number(yearStr), Number(monthStr) - 1 + offset, 1);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+};
+
+const normalizeAdvancePaymentMode = (mode?: string): PaymentMode => {
+  if (mode && (PAYMENT_MODE_VALUES as string[]).includes(mode)) {
+    return mode as PaymentMode;
+  }
+  if (mode === "upi") {
+    return "upi_office";
+  }
+  return "cash";
+};
 
 const distributeAdvanceAcrossMonths = (
   sortedMonths: string[],
@@ -145,11 +164,12 @@ feesRouter.get(
   allowFeeRead,
   asyncHandler(async (req, res) => {
     const authReq = req as AuthenticatedRequest;
-    const { month, busId, academicYear, status } = req.query as {
+    const { month, busId, academicYear, status, search } = req.query as {
       month?: string;
       busId?: string;
       academicYear?: string;
       status?: string;
+      search?: string;
     };
     if (!month) {
       res.status(400).json({ success: false, data: null, message: "month is required" });
@@ -169,7 +189,20 @@ feesRouter.get(
     }
 
     const activeTransports = await StudentTransport.find(transportFilter).select("studentId");
-    const transportStudentIds = activeTransports.map((t) => t.studentId);
+    let transportStudentIds = activeTransports.map((t) => t.studentId);
+
+    const searchTerm = search?.trim();
+    if (searchTerm && transportStudentIds.length > 0) {
+      const escaped = searchTerm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const nameRegex = new RegExp(escaped, "i");
+      const matchingStudents = await Student.find({
+        ...orgFilter(authReq, res),
+        _id: { $in: transportStudentIds },
+        status: "active",
+        $or: [{ name: nameRegex }, { grade: nameRegex }]
+      }).select("_id");
+      transportStudentIds = matchingStudents.map((s) => s._id as Types.ObjectId);
+    }
 
     const filter: Record<string, unknown> = {
       ...orgFilter(authReq, res),
@@ -299,12 +332,13 @@ feesRouter.post(
   isSuperAdminOrOrgStaff("canCollectFees"),
   asyncHandler(async (req, res) => {
     const authReq = req as AuthenticatedRequest;
-    const { studentId, months, amountPaid, academicYear, notes } = req.body as {
+    const { studentId, months, amountPaid, academicYear, notes, paymentMode } = req.body as {
       studentId?: string;
       months?: string[];
       amountPaid?: number;
       academicYear?: string;
       notes?: string;
+      paymentMode?: string;
     };
 
     if (
@@ -323,11 +357,11 @@ feesRouter.post(
     }
 
     const sortedMonths = sortMonths(months);
-    if (sortedMonths.length < 2 || sortedMonths.length > 12) {
+    if (sortedMonths.length < 1 || sortedMonths.length > 12) {
       res.status(400).json({
         success: false,
         data: null,
-        message: "months must contain between 2 and 12 unique YYYY-MM values"
+        message: "months must contain between 1 and 12 unique YYYY-MM values"
       });
       return;
     }
@@ -363,20 +397,58 @@ feesRouter.post(
     }
 
     const monthlyFee = transport.monthlyTransportFee;
-    const totalDue = monthlyFee * sortedMonths.length;
+    const resolvedPaymentMode = normalizeAdvancePaymentMode(paymentMode);
 
-    const alreadyPaid = await FeePayment.findOne({
-      ...orgFilter(authReq, res),
-      studentId: student._id,
-      academicYear,
-      month: { $in: sortedMonths },
-      status: "paid"
-    });
-    if (alreadyPaid) {
+    const monthDueAmounts = new Map<string, number>();
+    let totalDue = 0;
+
+    for (const month of sortedMonths) {
+      const existing = await FeePayment.findOne({
+        ...orgFilter(authReq, res),
+        studentId: student._id,
+        academicYear,
+        month
+      });
+
+      if (existing?.status === "paid") {
+        res.status(400).json({
+          success: false,
+          data: null,
+          message: `Month ${month} is already fully paid`
+        });
+        return;
+      }
+
+      if (existing && existing.amountPaid > 0) {
+        res.status(400).json({
+          success: false,
+          data: null,
+          message: `Month ${month} has a partial payment — use single-month Collect to finish it`
+        });
+        return;
+      }
+
+      const due = existing
+        ? Math.max(0, existing.amount - existing.amountPaid)
+        : monthlyFee;
+      monthDueAmounts.set(month, due);
+      totalDue += due;
+    }
+
+    if (!Number.isFinite(amountPaid) || amountPaid <= 0) {
       res.status(400).json({
         success: false,
         data: null,
-        message: `One or more selected months are already fully paid (e.g. ${alreadyPaid.month})`
+        message: "amountPaid must be a positive number"
+      });
+      return;
+    }
+
+    if (amountPaid !== totalDue) {
+      res.status(400).json({
+        success: false,
+        data: null,
+        message: `amountPaid must equal ${totalDue} for the selected months`
       });
       return;
     }
@@ -435,7 +507,8 @@ feesRouter.post(
           collectedBy: authReq.user?.userId ? new Types.ObjectId(authReq.user.userId) : undefined,
           notes: notes ?? existing?.notes,
           feeGroupId: feeGroupDoc._id,
-          paymentType: "advance"
+          paymentType: "advance",
+          paymentMode: resolvedPaymentMode
         },
         { new: true, upsert: true, setDefaultsOnInsert: true }
       )
@@ -451,10 +524,256 @@ feesRouter.post(
     const feeGroup = await FeeGroup.findById(feeGroupDoc._id).populate("collectedBy", "name");
 
     await invalidateOrgReportsCache(String(student.organizationId));
+    const primaryPayment = paymentsOut[0] as { _id?: Types.ObjectId } | undefined;
+
     res.status(201).json({
       success: true,
-      data: { feeGroup, payments: paymentsOut },
+      data: {
+        feeGroup,
+        payments: paymentsOut,
+        primaryPaymentId: primaryPayment?._id ? String(primaryPayment._id) : null
+      },
       message: "Advance fee payment recorded successfully"
+    });
+  })
+);
+
+feesRouter.get(
+  "/transport/student/:studentId",
+  ...scopeMiddleware,
+  isSuperAdminOrOrgStaff("canCollectFees"),
+  asyncHandler(async (req, res) => {
+    const authReq = req as AuthenticatedRequest;
+    const studentId = String(req.params.studentId);
+    const { academicYear, fromMonth } = req.query as {
+      academicYear?: string;
+      fromMonth?: string;
+    };
+
+    if (!Types.ObjectId.isValid(studentId)) {
+      res.status(400).json({ success: false, data: null, message: "Invalid student id" });
+      return;
+    }
+    if (!academicYear) {
+      res.status(400).json({
+        success: false,
+        data: null,
+        message: "academicYear query parameter is required"
+      });
+      return;
+    }
+
+    const student = await Student.findOne({ _id: studentId, ...orgFilter(authReq, res) });
+    if (!student) {
+      res.status(404).json({ success: false, data: null, message: "Student not found" });
+      return;
+    }
+
+    const transport = await StudentTransport.findOne({
+      ...orgFilter(authReq, res),
+      studentId: student._id,
+      status: "active",
+      academicYear
+    }).populate("busId", "busNumber routeName");
+
+    if (!transport) {
+      res.status(400).json({
+        success: false,
+        data: null,
+        message: "Student is not on active transport for this academic year"
+      });
+      return;
+    }
+
+    const startMonth =
+      fromMonth && /^\d{4}-\d{2}$/.test(fromMonth) ? fromMonth : monthKeyNow();
+    const monthKeys = Array.from({ length: 12 }, (_, index) => addCalendarMonths(startMonth, index));
+
+    const existingPayments = await FeePayment.find({
+      ...orgFilter(authReq, res),
+      studentId: student._id,
+      academicYear,
+      month: { $in: monthKeys }
+    });
+
+    const paymentByMonth = new Map(existingPayments.map((p) => [p.month, p]));
+    const nowKey = monthKeyNow();
+
+    const months = monthKeys.map((month) => {
+      const payment = paymentByMonth.get(month);
+      if (payment) {
+        return {
+          month,
+          amount: payment.amount,
+          amountPaid: payment.amountPaid,
+          status: payment.status,
+          feePaymentId: String(payment._id),
+          selectable: payment.status !== "paid" && payment.amountPaid === 0
+        };
+      }
+      const status: FeePaymentStatus = month < nowKey ? "overdue" : "pending";
+      return {
+        month,
+        amount: transport.monthlyTransportFee,
+        amountPaid: 0,
+        status,
+        feePaymentId: null as string | null,
+        selectable: true
+      };
+    });
+
+    const bus = transport.busId as unknown as { busNumber?: string; routeName?: string };
+
+    res.json({
+      success: true,
+      data: {
+        studentId: String(student._id),
+        studentName: student.name,
+        grade: student.grade,
+        academicYear,
+        monthlyFee: transport.monthlyTransportFee,
+        busNumber: bus?.busNumber ?? null,
+        routeName: bus?.routeName ?? null,
+        months
+      },
+      message: "Transport advance months fetched successfully"
+    });
+  })
+);
+
+feesRouter.get(
+  "/payment-history",
+  ...scopeMiddleware,
+  isSuperAdminOrOrgStaffAny("canCollectFees", "canViewReports"),
+  asyncHandler(async (req, res) => {
+    const authReq = req as AuthenticatedRequest;
+    const { studentId, academicYear } = req.query as {
+      studentId?: string;
+      academicYear?: string;
+    };
+    const { page, limit } = parsePaginationQuery(req.query, 20);
+    const orgF = orgFilter(authReq, res);
+
+    const transportFilter: Record<string, unknown> = {
+      ...orgF,
+      amountPaid: { $gt: 0 }
+    };
+    const schoolFilter: Record<string, unknown> = { ...orgF };
+
+    if (studentId && Types.ObjectId.isValid(studentId)) {
+      const studentObjectId = new Types.ObjectId(studentId);
+      transportFilter.studentId = studentObjectId;
+      schoolFilter.studentId = studentObjectId;
+    }
+    if (academicYear) {
+      transportFilter.academicYear = academicYear;
+      schoolFilter.academicYear = academicYear;
+    }
+
+    const perSourceLimit = Math.min(page * limit, 500);
+
+    const [transportRows, schoolRows, transportTotal, schoolTotal] = await Promise.all([
+      FeePayment.find(transportFilter)
+        .sort({ paidAt: -1, collectedAt: -1 })
+        .limit(perSourceLimit)
+        .populate("studentId", "name grade")
+        .populate("busId", "busNumber")
+        .lean(),
+      SchoolFeePayment.find(schoolFilter)
+        .sort({ paymentDate: -1 })
+        .limit(perSourceLimit)
+        .populate("studentId", "name grade")
+        .lean(),
+      FeePayment.countDocuments(transportFilter),
+      SchoolFeePayment.countDocuments(schoolFilter)
+    ]);
+
+    type HistoryRow = {
+      sortKey: number;
+      id: string;
+      feeType: "transport" | "school";
+      studentId: string;
+      studentName: string;
+      grade: string;
+      receiptNumber: string;
+      amountPaid: number;
+      paymentMode: string;
+      paidAt: string;
+      description: string;
+      transportPaymentId: string | null;
+      schoolReceiptNumber: string | null;
+    };
+
+    const formatMonthLabel = (monthKey: string): string => {
+      const parsed = new Date(`${monthKey}-01`);
+      if (Number.isNaN(parsed.getTime())) {
+        return monthKey;
+      }
+      return parsed.toLocaleDateString("en-IN", { month: "short", year: "numeric" });
+    };
+
+    const transportEntries: HistoryRow[] = transportRows.map((row) => {
+      const student = row.studentId as unknown as { _id?: Types.ObjectId; name?: string; grade?: string } | null;
+      const bus = row.busId as unknown as { busNumber?: string } | null;
+      const paidAt = row.paidAt ?? row.collectedAt ?? new Date();
+      const busLabel = bus?.busNumber ? ` · Bus ${bus.busNumber}` : "";
+      return {
+        sortKey: new Date(paidAt).getTime(),
+        id: String(row._id),
+        feeType: "transport" as const,
+        studentId: student?._id ? String(student._id) : String(row.studentId),
+        studentName: student?.name ?? "—",
+        grade: student?.grade ?? "—",
+        receiptNumber: String(row._id).slice(-6).toUpperCase(),
+        amountPaid: row.amountPaid,
+        paymentMode: row.paymentMode ?? "cash",
+        paidAt: new Date(paidAt).toISOString(),
+        description: `Transport · ${formatMonthLabel(row.month)}${busLabel}`,
+        transportPaymentId: String(row._id),
+        schoolReceiptNumber: null
+      };
+    });
+
+    const schoolEntries: HistoryRow[] = schoolRows.map((row) => {
+      const student = row.studentId as unknown as { _id?: Types.ObjectId; name?: string; grade?: string } | null;
+      const heads = row.feeHeadPayments?.map((h) => h.feeHeadName).filter(Boolean) ?? [];
+      const description =
+        heads.length > 0 ? `School · ${heads.slice(0, 2).join(", ")}${heads.length > 2 ? "…" : ""}` : "School fees";
+      return {
+        sortKey: new Date(row.paymentDate).getTime(),
+        id: String(row._id),
+        feeType: "school" as const,
+        studentId: student?._id ? String(student._id) : String(row.studentId),
+        studentName: student?.name ?? "—",
+        grade: student?.grade ?? "—",
+        receiptNumber: row.receiptNumber,
+        amountPaid: row.totalAmountPaid,
+        paymentMode: row.paymentMode,
+        paidAt: new Date(row.paymentDate).toISOString(),
+        description,
+        transportPaymentId: null,
+        schoolReceiptNumber: row.receiptNumber
+      };
+    });
+
+    const merged = [...transportEntries, ...schoolEntries].sort((a, b) => b.sortKey - a.sortKey);
+    const total = transportTotal + schoolTotal;
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const start = (page - 1) * limit;
+    const data = merged.slice(start, start + limit).map(({ sortKey: _sortKey, ...entry }) => entry);
+
+    res.json({
+      success: true,
+      data,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages,
+        hasNext: page < totalPages,
+        hasPrev: page > 1
+      },
+      message: "Payment history fetched successfully"
     });
   })
 );
@@ -559,7 +878,10 @@ const buildReceiptData = async (paymentId: string, orgScopeFilter: Record<string
   };
   const bus = payment.busId as unknown as { busNumber: string };
   const transport = payment.transportId as unknown as { monthlyTransportFee?: number } | null;
-  const collector = payment.collectedBy as unknown as { name: string } | null;
+  const organizationId = String(payment.organizationId);
+  const organization = await getOrgReceiptBranding(organizationId);
+  const collectedByLabel =
+    organization?.displayName?.trim() || organization?.orgName || "School";
 
   const base: Record<string, unknown> = {
     studentName: student?.name,
@@ -570,14 +892,15 @@ const buildReceiptData = async (paymentId: string, orgScopeFilter: Record<string
     amountPaid: payment.amountPaid,
     status: payment.status,
     paidAt: payment.paidAt,
-    collectedBy: collector?.name ?? null,
+    collectedBy: collectedByLabel,
+    paymentMode: payment.paymentMode ?? "cash",
     receiptNumber: String(payment._id).slice(-6).toUpperCase(),
     paymentType: payment.paymentType ?? "single",
     isPartOfGroup: false
   };
 
   if (!payment.feeGroupId) {
-    return base;
+    return { ...base, organization };
   }
 
   const group = await FeeGroup.findById(payment.feeGroupId);
@@ -585,16 +908,31 @@ const buildReceiptData = async (paymentId: string, orgScopeFilter: Record<string
     month: 1
   });
 
+  const groupedMonths = groupPayments.map((p) => ({
+    month: p.month,
+    status: p.status,
+    amountPaid: p.amountPaid,
+    amountDue: p.amount
+  }));
+  const totalAmountDue = groupedMonths.reduce((sum, row) => sum + row.amountDue, 0);
+  const totalAmountPaid = groupedMonths.reduce((sum, row) => sum + row.amountPaid, 0);
+  const allPaid = groupedMonths.every((row) => row.status === "paid");
+
   return {
     ...base,
+    organization,
     isPartOfGroup: true,
+    isAdvance: true,
     groupReceiptNumber: group?.receiptNumber ?? null,
-    groupedMonths: groupPayments.map((p) => ({
-      month: p.month,
-      status: p.status,
-      amountPaid: p.amountPaid,
-      amountDue: p.amount
-    }))
+    receiptNumber: group?.receiptNumber ?? base.receiptNumber,
+    groupedMonths,
+    month: groupedMonths.map((g) => g.month).join(", "),
+    monthlyFee: totalAmountDue,
+    amountPaid: totalAmountPaid,
+    amountDue: totalAmountDue,
+    status: allPaid ? "paid" : payment.status,
+    paidAt: group?.collectedAt ?? payment.paidAt,
+    paymentMode: payment.paymentMode ?? "cash"
   };
 };
 

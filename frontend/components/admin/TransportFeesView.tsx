@@ -3,15 +3,15 @@
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
+import { useAcademicYear } from "@/hooks/useAcademicYear";
+import { CollectAdvanceModal } from "@/components/fees/CollectAdvanceModal";
 import { PaymentModeModal } from "@/components/payments/PaymentModeModal";
 import { ReceiptDownload } from "@/components/payments/ReceiptDownload";
 import { ListPagination } from "@/components/shared/ListPagination";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
-import { Card } from "@/components/ui/Card";
 import { TableSkeleton } from "@/components/ui/TableSkeleton";
 import { useToast } from "@/components/ui/Toast";
-import { ACADEMIC_YEAR } from "@/lib/constants";
 import { api } from "@/lib/api";
 import { downloadFromApi } from "@/lib/fileDownload";
 import { paymentModeIcon } from "@/lib/payments";
@@ -27,18 +27,33 @@ interface PaymentModalState {
   description: string;
 }
 
+interface AdvanceModalState {
+  studentId: string;
+  studentName: string;
+  busRoute: string;
+}
+
 export const TransportFeesView = (): JSX.Element => {
+  const orgAcademicYear = useAcademicYear();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const [busId, setBusId] = useState("");
   const [paymentModal, setPaymentModal] = useState<PaymentModalState | null>(null);
+  const [advanceModal, setAdvanceModal] = useState<AdvanceModalState | null>(null);
   const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [isExporting, setIsExporting] = useState(false);
 
   useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  useEffect(() => {
     setPage(1);
-  }, [month, busId]);
+  }, [month, busId, debouncedSearch]);
 
   const busesQuery = useQuery({
     queryKey: ["buses-filter"],
@@ -46,14 +61,15 @@ export const TransportFeesView = (): JSX.Element => {
   });
 
   const feesQuery = useQuery({
-    queryKey: ["fees", { page, month, busId, academicYear: ACADEMIC_YEAR }],
+    queryKey: ["fees", { page, month, busId, academicYear: orgAcademicYear, search: debouncedSearch }],
     queryFn: async () =>
       (
         await api.get<PaginatedResponse<FeePayment>>("/api/fees", {
           params: {
             month,
             busId: busId || undefined,
-            academicYear: ACADEMIC_YEAR,
+            academicYear: orgAcademicYear,
+            search: debouncedSearch.trim() || undefined,
             page,
             limit: 50
           }
@@ -64,10 +80,15 @@ export const TransportFeesView = (): JSX.Element => {
   const feeRows = feesQuery.data?.data ?? [];
   const pagination = feesQuery.data?.pagination;
 
-  const handlePaymentSuccess = (receiptNumber: string): void => {
+  const refreshFeeQueries = (): void => {
     queryClient.invalidateQueries({ queryKey: ["fees"] });
     queryClient.invalidateQueries({ queryKey: ["nav-badge-transport-pending"] });
     queryClient.invalidateQueries({ queryKey: ["fees-tab-badge-transport"] });
+    queryClient.invalidateQueries({ queryKey: ["transport-advance-preview"] });
+  };
+
+  const handlePaymentSuccess = (receiptNumber: string): void => {
+    refreshFeeQueries();
     showToast("success", `Payment recorded — ${receiptNumber}`);
     setPaymentModal(null);
   };
@@ -93,17 +114,31 @@ export const TransportFeesView = (): JSX.Element => {
 
   return (
     <>
-      <div className="mb-3 flex justify-end">
-        <Button variant="secondary" onClick={handleExport} disabled={isExporting}>
-          {isExporting ? "Exporting..." : "Export"}
-        </Button>
-      </div>
-      <Card>
-        <p className="mb-3 text-sm text-slate-600">
-          Showing transport-registered students for {month}
-          {pagination ? ` (${pagination.total} records)` : ""}.
-        </p>
-        <div className="mb-3 grid gap-2 md:grid-cols-2">
+      <div className="space-y-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-slate-600">
+            Showing transport-registered students for {month}
+            {pagination ? ` (${pagination.total} records)` : ""}
+            {debouncedSearch.trim() ? ` · matching “${debouncedSearch.trim()}”` : ""}.
+          </p>
+          <Button
+            variant="secondary"
+            size="sm"
+            className="shrink-0 self-end sm:self-auto"
+            onClick={handleExport}
+            disabled={isExporting}
+          >
+            {isExporting ? "Exporting..." : "Export"}
+          </Button>
+        </div>
+        <div className="grid gap-2 md:grid-cols-3">
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by student name or grade..."
+            className="rounded border border-slate-200 px-3 py-2 text-sm md:col-span-1"
+          />
           <input
             type="month"
             value={month}
@@ -125,6 +160,12 @@ export const TransportFeesView = (): JSX.Element => {
         </div>
         {feesQuery.isLoading ? (
           <TableSkeleton />
+        ) : feeRows.length === 0 ? (
+          <p className="py-6 text-center text-sm text-slate-500">
+            {debouncedSearch.trim()
+              ? "No transport students match your search for this month."
+              : "No transport fee records for this month."}
+          </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-[900px] w-full text-sm">
@@ -176,6 +217,24 @@ export const TransportFeesView = (): JSX.Element => {
                         )}
                       </td>
                       <td className="space-x-2 whitespace-nowrap">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="mr-1"
+                          onClick={() => {
+                            const busNumber =
+                              typeof payment.busId === "string"
+                                ? undefined
+                                : payment.busId.busNumber;
+                            setAdvanceModal({
+                              studentId,
+                              studentName,
+                              busRoute: busNumber ? `Bus ${busNumber}` : "Transport"
+                            });
+                          }}
+                        >
+                          Collect Advance
+                        </Button>
                         {canCollect && (
                           <Button
                             variant="secondary"
@@ -211,7 +270,7 @@ export const TransportFeesView = (): JSX.Element => {
         {pagination && (
           <ListPagination pagination={pagination} noun="fee records" onPageChange={setPage} />
         )}
-      </Card>
+      </div>
 
       {paymentModal && (
         <PaymentModeModal
@@ -224,6 +283,19 @@ export const TransportFeesView = (): JSX.Element => {
           amount={paymentModal.amount}
           description={paymentModal.description}
           onSuccess={handlePaymentSuccess}
+        />
+      )}
+
+      {advanceModal && (
+        <CollectAdvanceModal
+          isOpen={!!advanceModal}
+          onClose={() => setAdvanceModal(null)}
+          studentId={advanceModal.studentId}
+          studentName={advanceModal.studentName}
+          busRoute={advanceModal.busRoute}
+          academicYear={orgAcademicYear}
+          fromMonth={month}
+          onSuccess={refreshFeeQueries}
         />
       )}
     </>

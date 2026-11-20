@@ -18,6 +18,11 @@ import { Student } from "../models/Student";
 import { StudentTransport } from "../models/StudentTransport";
 import { StudentFeeAssignment } from "../models/StudentFeeAssignment";
 import { asyncHandler } from "../utils/asyncHandler";
+import {
+  busCapacityExceededMessage,
+  countActiveStudentsOnBus,
+  wouldExceedBusCapacity
+} from "../utils/busCapacity";
 import { generateTemplate, parseExcelBuffer, type TemplateHeader } from "../utils/excelParser";
 import { getScopedOrganizationId, orgFilter } from "../utils/orgFilter";
 import {
@@ -35,6 +40,7 @@ import {
   formatStudentFeeStatusLabel
 } from "../services/schoolFeeService";
 import type { IStudent } from "../models/Student";
+import { getCurrentAcademicYear } from "../utils/academicYear";
 
 const bulkRouter = Router();
 
@@ -59,7 +65,7 @@ const buildStudentTemplateHeaders = (orgConfig: OrgGradeConfig): TemplateHeader[
     { key: "parentName", header: "Parent Name", example: "Suresh Sharma" },
     { key: "parentPhone", header: "Parent Phone", example: "9876543210" },
     { key: "address", header: "Address", example: "123 MG Road, Bengaluru" },
-    { key: "academicYear", header: "Academic Year", example: "2025-26" }
+    { key: "academicYear", header: "Academic Year", example: getCurrentAcademicYear() }
   ];
   return headers;
 };
@@ -71,7 +77,7 @@ const transportTemplateHeaders: TemplateHeader[] = [
   { key: "pickupStop", header: "Pickup Stop", example: "Koramangala" },
   { key: "dropStop", header: "Drop Stop", example: "Koramangala" },
   { key: "monthlyFee", header: "Monthly Fee", example: "1500" },
-  { key: "effectiveFrom", header: "Effective From", example: "2025-04-01" }
+  { key: "effectiveFrom", header: "Effective From", example: `${getCurrentAcademicYear().slice(0, 4)}-04-01` }
 ];
 
 type PreviewRow = {
@@ -490,6 +496,33 @@ bulkRouter.post(
     const foundIds = new Set(students.map((student) => student._id.toString()));
     const notFound = objectIds.filter((id) => !foundIds.has(id.toString())).length;
 
+    const activeOnBus = await countActiveStudentsOnBus(orgId, bus._id);
+    const existingTransports = await StudentTransport.find({
+      organizationId: new Types.ObjectId(orgId),
+      studentId: { $in: students.map((student) => student._id) },
+      status: "active"
+    }).select("studentId");
+    const studentsWithTransport = new Set(
+      existingTransports.map((transport) => transport.studentId.toString())
+    );
+    const seatsNeeded = students.filter(
+      (student) => !studentsWithTransport.has(student._id.toString())
+    ).length;
+
+    if (wouldExceedBusCapacity(bus.capacity, activeOnBus, seatsNeeded)) {
+      res.status(400).json({
+        success: false,
+        data: null,
+        message: busCapacityExceededMessage(
+          bus.busNumber,
+          bus.capacity,
+          activeOnBus,
+          seatsNeeded
+        )
+      });
+      return;
+    }
+
     const fee = Number(monthlyTransportFee ?? 1500);
     const effectiveFromDate = effectiveFrom ? new Date(effectiveFrom) : new Date();
     let created = 0;
@@ -497,12 +530,7 @@ bulkRouter.post(
     const failures: Array<{ studentId: string; reason: string }> = [];
 
     for (const student of students) {
-      const existing = await StudentTransport.findOne({
-        organizationId: new Types.ObjectId(orgId),
-        studentId: student._id,
-        status: "active"
-      });
-      if (existing) {
+      if (studentsWithTransport.has(student._id.toString())) {
         skipped += 1;
         failures.push({
           studentId: student._id.toString(),
@@ -545,9 +573,10 @@ bulkRouter.post(
   asyncHandler(async (req, res) => {
     const authReq = req as AuthenticatedRequest;
     const orgId = getScopedOrganizationId(authReq, res)!;
-    const { grade, busId, academicYear, monthlyTransportFee, pickupStop, effectiveFrom } =
+    const { grade, section, busId, academicYear, monthlyTransportFee, pickupStop, effectiveFrom } =
       req.body as {
         grade?: string;
+        section?: string;
         busId?: string;
         academicYear?: string;
         monthlyTransportFee?: number;
@@ -574,11 +603,44 @@ bulkRouter.post(
       return;
     }
 
-    const gradeStudents = await Student.find({
+    const studentFilter: Record<string, unknown> = {
       organizationId: new Types.ObjectId(orgId),
       status: "active",
       grade
-    }).select("_id");
+    };
+    const sectionFilter = typeof section === "string" ? section.trim() : "";
+    if (sectionFilter) {
+      studentFilter.section = sectionFilter;
+    }
+
+    const gradeStudents = await Student.find(studentFilter).select("_id");
+
+    const activeOnBus = await countActiveStudentsOnBus(orgId, bus._id);
+    const existingTransports = await StudentTransport.find({
+      organizationId: new Types.ObjectId(orgId),
+      studentId: { $in: gradeStudents.map((student) => student._id) },
+      status: "active"
+    }).select("studentId");
+    const studentsWithTransport = new Set(
+      existingTransports.map((transport) => transport.studentId.toString())
+    );
+    const seatsNeeded = gradeStudents.filter(
+      (student) => !studentsWithTransport.has(student._id.toString())
+    ).length;
+
+    if (wouldExceedBusCapacity(bus.capacity, activeOnBus, seatsNeeded)) {
+      res.status(400).json({
+        success: false,
+        data: null,
+        message: busCapacityExceededMessage(
+          bus.busNumber,
+          bus.capacity,
+          activeOnBus,
+          seatsNeeded
+        )
+      });
+      return;
+    }
 
     const fee = Number(monthlyTransportFee ?? 1500);
     const effectiveFromDate = effectiveFrom ? new Date(effectiveFrom) : new Date();
@@ -586,12 +648,7 @@ bulkRouter.post(
     let skipped = 0;
 
     for (const student of gradeStudents) {
-      const existing = await StudentTransport.findOne({
-        organizationId: new Types.ObjectId(orgId),
-        studentId: student._id,
-        status: "active"
-      });
-      if (existing) {
+      if (studentsWithTransport.has(student._id.toString())) {
         skipped += 1;
         continue;
       }
@@ -1025,10 +1082,14 @@ bulkRouter.get(
   asyncHandler(async (req, res) => {
     const authReq = req as AuthenticatedRequest;
     const orgId = getScopedOrganizationId(authReq, res)!;
-    const { grade, busId, status, academicYear } = req.query as Record<string, string | undefined>;
+    const { grade, section, busId, status, academicYear } = req.query as Record<
+      string,
+      string | undefined
+    >;
 
     const filter: Record<string, unknown> = { ...orgFilter(authReq, res) };
     if (grade) filter.grade = grade;
+    if (section) filter.section = section;
     if (status) filter.status = status;
     if (academicYear) filter.academicYear = academicYear;
 

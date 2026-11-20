@@ -10,8 +10,8 @@ import { OrgBrandingPanel } from "@/components/superadmin/OrgBrandingPanel";
 import { OrgFeaturesPanel } from "@/components/superadmin/OrgFeaturesPanel";
 import { OrgOverviewPanel } from "@/components/superadmin/OrgOverviewPanel";
 import { OrgSetupPanel } from "@/components/superadmin/OrgSetupPanel";
-import { PageWrapper } from "@/components/layout/PageWrapper";
-import { Card } from "@/components/ui/Card";
+import { SuperPageWrapper } from "@/components/layout/SuperPageWrapper";
+import { SuperAdminSectionCard } from "@/components/superadmin/SuperAdminSectionCard";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type { Organization } from "@/types/schoolFees";
@@ -72,29 +72,29 @@ const OrganizationDetailPage = (): JSX.Element => {
 
   if (orgQuery.isLoading) {
     return (
-      <PageWrapper title="Organization">
-        <Card>
+      <SuperPageWrapper title="Organization">
+        <SuperAdminSectionCard>
           <p className="text-sm text-gray-500">Loading organization…</p>
-        </Card>
-      </PageWrapper>
+        </SuperAdminSectionCard>
+      </SuperPageWrapper>
     );
   }
 
   if (orgQuery.isError || !organization) {
     return (
-      <PageWrapper title="Organization">
-        <Card>
+      <SuperPageWrapper title="Organization">
+        <SuperAdminSectionCard>
           <p className="text-sm text-red-600">Organization not found.</p>
-          <Link href="/super/organizations" className="mt-3 inline-block text-sm text-primary-600">
+          <Link href="/super/organizations" className="mt-3 inline-block text-sm text-primary hover:underline">
             ← Organizations
           </Link>
-        </Card>
-      </PageWrapper>
+        </SuperAdminSectionCard>
+      </SuperPageWrapper>
     );
   }
 
   return (
-    <PageWrapper
+    <SuperPageWrapper
       title={
         <div className="flex flex-wrap items-center gap-3">
           <span>{organization.name}</span>
@@ -117,8 +117,8 @@ const OrganizationDetailPage = (): JSX.Element => {
         </Link>
       }
     >
-      <Card>
-        <div className="mb-6 flex flex-wrap gap-1 rounded-lg border border-gray-100 bg-gray-50 p-1">
+      <SuperAdminSectionCard>
+        <div className="mb-6 flex flex-wrap gap-1 rounded-md border border-gray-200 bg-gray-50 p-1">
           {TABS.map((tab) => (
             <Link
               key={tab.id}
@@ -158,8 +158,8 @@ const OrganizationDetailPage = (): JSX.Element => {
         {activeTab === "admin" && (
           <OrgAdminPanel organizationId={organization._id} organizationName={organization.name} />
         )}
-      </Card>
-    </PageWrapper>
+      </SuperAdminSectionCard>
+    </SuperPageWrapper>
   );
 };
 

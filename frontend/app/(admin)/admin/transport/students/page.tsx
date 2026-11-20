@@ -4,17 +4,18 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
 
+import { useAcademicYear } from "@/hooks/useAcademicYear";
 import { StudentTransportModal } from "@/components/admin/StudentTransportModal";
 import { PageWrapper } from "@/components/layout/PageWrapper";
 import { TransportSubNav } from "@/components/layout/TransportSubNav";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { TableSkeleton } from "@/components/ui/TableSkeleton";
-import { ACADEMIC_YEAR } from "@/lib/constants";
 import { api } from "@/lib/api";
 import type { Student, StudentTransportRecord } from "@/types";
 
 const TransportStudentsPage = (): JSX.Element => {
+  const orgAcademicYear = useAcademicYear();
   const [busId, setBusId] = useState("");
   const [search, setSearch] = useState("");
   const [modalStudent, setModalStudent] = useState<Student | null>(null);
@@ -27,7 +28,7 @@ const TransportStudentsPage = (): JSX.Element => {
           params: {
             busId: busId || undefined,
             status: "active",
-            academicYear: ACADEMIC_YEAR,
+            academicYear: orgAcademicYear,
             search: search || undefined
           }
         })

@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 
+import { shiftAcademicYear } from "@/lib/academicYear";
+import { useAcademicYear } from "@/hooks/useAcademicYear";
 import { BulkProgressStepper } from "@/components/shared/BulkProgressStepper";
 import { PageWrapper } from "@/components/layout/PageWrapper";
 import { Button } from "@/components/ui/Button";
@@ -42,7 +44,11 @@ type PreviewResponse = {
 const GradePromotionPage = (): JSX.Element => {
   const { showToast } = useToast();
   const [step, setStep] = useState(1);
-  const [academicYear, setAcademicYear] = useState("2026-27");
+  const nextAcademicYear = shiftAcademicYear(useAcademicYear(), 1);
+  const [academicYear, setAcademicYear] = useState(nextAcademicYear);
+  useEffect(() => {
+    setAcademicYear(nextAcademicYear);
+  }, [nextAcademicYear]);
   const [promotionMap, setPromotionMap] = useState<Record<string, string>>(defaultMap);
   const [previewData, setPreviewData] = useState<PreviewResponse | null>(null);
   const [resultData, setResultData] = useState<{ promoted: number; graduated: number } | null>(null);
@@ -111,7 +117,7 @@ const GradePromotionPage = (): JSX.Element => {
               value={academicYear}
               onChange={(e) => setAcademicYear(e.target.value)}
               className="rounded border px-3 py-2"
-              placeholder="2026-27"
+              placeholder={nextAcademicYear}
             />
           </label>
 

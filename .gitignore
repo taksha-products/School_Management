@@ -1,6 +1,43 @@
+# Dependencies
 node_modules/
+
+# Build output (Render rebuilds backend/dist with `npm run build`)
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+
+# Environment files (secrets) — keep the .example templates tracked
+.env
+.env.*
+!.env.example
+
+# Runtime uploads (org logos are written here by the backend at runtime)
+backend/public/logos/*
+
+# Test output
 test-results/
 playwright-report/
 blob-report/
 playwright/.cache/
-.next/
+coverage/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS / editor files
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# Local tool caches
+.cache/
+.eslintcache

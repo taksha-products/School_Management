@@ -20,6 +20,9 @@ export const ListPagination = ({
     return null;
   }
 
+  const hasPrev = pagination.hasPrev ?? pagination.page > 1;
+  const hasNext = pagination.hasNext ?? pagination.page < pagination.totalPages;
+
   return (
     <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4">
       <p className="text-sm text-slate-600">{paginationLabel(pagination, noun)}</p>
@@ -27,7 +30,7 @@ export const ListPagination = ({
         <Button
           type="button"
           variant="secondary"
-          disabled={!pagination.hasPrev}
+          disabled={!hasPrev}
           onClick={() => onPageChange(pagination.page - 1)}
         >
           Previous
@@ -38,7 +41,7 @@ export const ListPagination = ({
         <Button
           type="button"
           variant="secondary"
-          disabled={!pagination.hasNext}
+          disabled={!hasNext}
           onClick={() => onPageChange(pagination.page + 1)}
         >
           Next

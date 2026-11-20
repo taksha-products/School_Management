@@ -1,8 +1,8 @@
 import type { NextFunction, Response } from "express";
 
+import { TWO_FACTOR_VERIFICATION_MAX_AGE_MS } from "../constants/twoFactor";
 import type { AuthenticatedRequest } from "./auth";
 import { User } from "../models/User";
-const VERIFICATION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Ensures super-admin users have 2FA enabled and verified within the last 24 hours.
@@ -59,7 +59,7 @@ export const require2FA = async (
   }
 
   const verifiedAt = user.twoFactorVerifiedAt.getTime();
-  const isRecent = Date.now() - verifiedAt <= VERIFICATION_MAX_AGE_MS;
+  const isRecent = Date.now() - verifiedAt <= TWO_FACTOR_VERIFICATION_MAX_AGE_MS;
 
   if (!isRecent) {
     res.status(403).json({

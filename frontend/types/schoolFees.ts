@@ -1,3 +1,5 @@
+import type { ReceiptOrgBranding } from "@/types/orgTheme";
+
 export type FeeHeadFrequency = "monthly" | "quarterly" | "annual" | "oneTime";
 export type FeeHeadCategory = "academic" | "transport" | "facility" | "exam" | "other";
 export type SchoolPaymentMode = "cash" | "upi" | "cheque" | "online";
@@ -174,6 +176,7 @@ export interface SchoolFeeReceipt {
   totalLateFee: number;
   collectedBy?: string;
   notes?: string;
+  organization?: ReceiptOrgBranding | null;
 }
 
 export interface SchoolFeeSummary {

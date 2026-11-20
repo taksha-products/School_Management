@@ -37,6 +37,7 @@ import {
   is2FAAttemptsExceeded,
   setPendingTotpSecret
 } from "../utils/twoFactorRedis";
+import { TWO_FACTOR_VERIFICATION_MAX_AGE_MS } from "../constants/twoFactor";
 import { loginValidation } from "../validators/auth";
 
 const authRouter = Router();
@@ -194,7 +195,12 @@ authRouter.post(
       }
 
       const publicUser = await issueSession(user, req, res);
-      res.json({ success: true, user: publicUser });
+      const requires2FASetup = user.role === "superAdmin" && !user.twoFactorEnabled;
+      res.json({
+        success: true,
+        user: publicUser,
+        ...(requires2FASetup ? { requires2FASetup: true } : {})
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Authentication failed";
       res.status(500).json({
@@ -654,6 +660,93 @@ authRouter.post(
   })
 );
 
+const isSuperAdminVerificationExpired = (verifiedAt?: Date | null): boolean => {
+  if (!verifiedAt) {
+    return true;
+  }
+  return Date.now() - verifiedAt.getTime() > TWO_FACTOR_VERIFICATION_MAX_AGE_MS;
+};
+
+authRouter.post(
+  "/2fa/reverify",
+  auth,
+  asyncHandler(async (req, res) => {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) {
+      res.status(401).json({ success: false, message: "Unauthorized" });
+      return;
+    }
+
+    if (authReq.user.role !== "superAdmin") {
+      res.status(403).json({
+        success: false,
+        error: "2FA re-verification is only required for super admin accounts",
+        code: "2FA_REVERIFY_NOT_REQUIRED"
+      });
+      return;
+    }
+
+    const { code } = req.body as { code?: string };
+    if (!code || typeof code !== "string") {
+      res.status(400).json({ success: false, error: "Verification code is required" });
+      return;
+    }
+
+    if (await is2FAAttemptsExceeded(authReq.user.userId)) {
+      res.status(429).json({
+        success: false,
+        error: "Too many 2FA attempts. Please try again later.",
+        code: "2FA_RATE_LIMITED"
+      });
+      return;
+    }
+
+    const user = await User.findById(authReq.user.userId).select(
+      "+twoFactorSecret +backupCodes twoFactorEnabled"
+    );
+
+    if (!user || !user.twoFactorEnabled || !user.twoFactorSecret) {
+      res.status(403).json({
+        success: false,
+        error: "Two-factor authentication setup is required for super admin accounts",
+        code: "2FA_SETUP_REQUIRED"
+      });
+      return;
+    }
+
+    let verified = false;
+
+    if (isBackupCodeFormat(code)) {
+      const backupResult = await verifyBackupCode(code, user.backupCodes ?? []);
+      if (backupResult.valid) {
+        user.backupCodes = backupResult.remainingCodes;
+        verified = true;
+      }
+    } else if (/^\d{6}$/.test(code.trim())) {
+      const secret = decryptSecretFromStorage(user.twoFactorSecret);
+      verified = verifyToken(secret, code.trim());
+    }
+
+    if (!verified) {
+      res.status(401).json({
+        success: false,
+        error: "Invalid 2FA code",
+        code: "2FA_INVALID"
+      });
+      return;
+    }
+
+    await clear2FAAttempts(authReq.user.userId);
+    user.twoFactorVerifiedAt = new Date();
+    await user.save();
+
+    res.json({
+      success: true,
+      verifiedAt: user.twoFactorVerifiedAt
+    });
+  })
+);
+
 authRouter.get(
   "/2fa/status",
   auth,
@@ -671,11 +764,18 @@ authRouter.get(
       return;
     }
 
+    const isSuperAdmin = authReq.user.role === "superAdmin";
+    const needsSetup = isSuperAdmin && !user.twoFactorEnabled;
+    const needsReverify =
+      isSuperAdmin && user.twoFactorEnabled && isSuperAdminVerificationExpired(user.twoFactorVerifiedAt);
+
     res.json({
       success: true,
       enabled: user.twoFactorEnabled,
       verifiedAt: user.twoFactorVerifiedAt ?? null,
-      backupCodesRemaining: user.twoFactorEnabled ? (user.backupCodes?.length ?? 0) : 0
+      backupCodesRemaining: user.twoFactorEnabled ? (user.backupCodes?.length ?? 0) : 0,
+      needsSetup,
+      needsReverify
     });
   })
 );

@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
+import { useAcademicYear } from "@/hooks/useAcademicYear";
 import { ListPagination } from "@/components/shared/ListPagination";
 import { PageWrapper } from "@/components/layout/PageWrapper";
 import { Button } from "@/components/ui/Button";
@@ -35,6 +36,7 @@ const recentMonths = Array.from({ length: 6 }).map((_, i) => {
 });
 
 const StudentsPage = (): JSX.Element => {
+  const orgAcademicYear = useAcademicYear();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const [open, setOpen] = useState(false);
@@ -51,7 +53,7 @@ const StudentsPage = (): JSX.Element => {
 
   const form = useForm<StudentForm>({
     resolver: zodResolver(studentSchema),
-    defaultValues: { status: "active", academicYear: "2025-26" }
+    defaultValues: { status: "active", academicYear: orgAcademicYear }
   });
 
   const busesQuery = useQuery({

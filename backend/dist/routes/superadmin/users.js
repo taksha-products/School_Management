@@ -75,14 +75,85 @@ superAdminUsersRouter.post("/", auth_1.auth, roleCheck_1.isSuperAdmin, (0, async
         message: "User created successfully"
     });
 }));
+const SUPER_ADMIN_USER_UPDATE_FIELDS = new Set(["name", "email", "password", "isActive"]);
 superAdminUsersRouter.put("/:id", auth_1.auth, roleCheck_1.isSuperAdmin, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
-    const updates = { ...req.body };
-    delete updates.passwordHash;
-    if (typeof updates.password === "string") {
-        updates.passwordHash = await bcryptjs_1.default.hash(updates.password, 10);
-        delete updates.password;
+    const authReq = req;
+    const body = req.body;
+    const unknownFields = Object.keys(body).filter((field) => !SUPER_ADMIN_USER_UPDATE_FIELDS.has(field));
+    if (unknownFields.length > 0) {
+        res.status(400).json({
+            success: false,
+            data: null,
+            message: `Only name, email, password, and isActive may be updated (${unknownFields.join(", ")} rejected)`
+        });
+        return;
     }
-    const user = await User_1.User.findByIdAndUpdate(req.params.id, updates, {
+    const existingUser = await User_1.User.findById(req.params.id);
+    if (!existingUser) {
+        res.status(404).json({
+            success: false,
+            data: null,
+            message: "User not found"
+        });
+        return;
+    }
+    if (authReq.user?.userId === existingUser._id.toString() &&
+        body.isActive === false) {
+        res.status(400).json({
+            success: false,
+            data: null,
+            message: "You cannot deactivate your own account"
+        });
+        return;
+    }
+    const updates = {};
+    if (typeof body.name === "string") {
+        const name = body.name.trim();
+        if (!name) {
+            res.status(400).json({
+                success: false,
+                data: null,
+                message: "name cannot be empty"
+            });
+            return;
+        }
+        updates.name = name;
+    }
+    if (typeof body.email === "string") {
+        const email = body.email.trim().toLowerCase();
+        if (!email) {
+            res.status(400).json({
+                success: false,
+                data: null,
+                message: "email cannot be empty"
+            });
+            return;
+        }
+        updates.email = email;
+    }
+    if (typeof body.password === "string") {
+        if (body.password.length < 8) {
+            res.status(400).json({
+                success: false,
+                data: null,
+                message: "password must be at least 8 characters"
+            });
+            return;
+        }
+        updates.passwordHash = await bcryptjs_1.default.hash(body.password, 10);
+    }
+    if (typeof body.isActive === "boolean") {
+        updates.isActive = body.isActive;
+    }
+    if (Object.keys(updates).length === 0) {
+        res.status(400).json({
+            success: false,
+            data: null,
+            message: "No valid fields to update"
+        });
+        return;
+    }
+    const user = await User_1.User.findByIdAndUpdate(existingUser._id, updates, {
         new: true,
         runValidators: true
     }).populate("organizationId", "name code");

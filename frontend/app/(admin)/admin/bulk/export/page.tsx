@@ -1,14 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
+import { useAcademicYear } from "@/hooks/useAcademicYear";
 import { PageWrapper } from "@/components/layout/PageWrapper";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { useToast } from "@/components/ui/Toast";
 import { downloadFromApi } from "@/lib/fileDownload";
-import { ACADEMIC_YEAR } from "@/lib/constants";
 import { useOrgConfig } from "@/hooks/useOrgConfig";
 import { api } from "@/lib/api";
 import type { Bus } from "@/types";
@@ -16,6 +16,7 @@ import type { Bus } from "@/types";
 type ExportKey = "students" | "fees" | "outstanding" | "expenses";
 
 const BulkExportPage = (): JSX.Element => {
+  const orgAcademicYear = useAcademicYear();
   const { showToast } = useToast();
   const { gradeOptions } = useOrgConfig();
   const [loading, setLoading] = useState<Record<ExportKey, boolean>>({
@@ -28,24 +29,32 @@ const BulkExportPage = (): JSX.Element => {
     grade: "",
     busId: "",
     status: "active",
-    academicYear: ACADEMIC_YEAR
+    academicYear: orgAcademicYear
   });
   const [feesFilters, setFeesFilters] = useState({
     month: new Date().toISOString().slice(0, 7),
     busId: "",
     status: "",
-    academicYear: ACADEMIC_YEAR
+    academicYear: orgAcademicYear
   });
   const [outstandingFilters, setOutstandingFilters] = useState({
     grade: "",
-    academicYear: ACADEMIC_YEAR
+    academicYear: orgAcademicYear
   });
   const [expensesFilters, setExpensesFilters] = useState({
     month: new Date().toISOString().slice(0, 7),
     busId: "",
     category: "",
-    academicYear: ACADEMIC_YEAR
+    academicYear: orgAcademicYear
   });
+
+  // Filters start from the fallback year; switch them to the org's year once it loads.
+  useEffect(() => {
+    setStudentsFilters((prev) => ({ ...prev, academicYear: orgAcademicYear }));
+    setFeesFilters((prev) => ({ ...prev, academicYear: orgAcademicYear }));
+    setOutstandingFilters((prev) => ({ ...prev, academicYear: orgAcademicYear }));
+    setExpensesFilters((prev) => ({ ...prev, academicYear: orgAcademicYear }));
+  }, [orgAcademicYear]);
 
   const busesQuery = useQuery({
     queryKey: ["bulk-export-buses"],

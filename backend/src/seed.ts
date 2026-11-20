@@ -15,9 +15,11 @@ import { StudentFeeAssignment } from "./models/StudentFeeAssignment";
 import { StudentTransport } from "./models/StudentTransport";
 import { User } from "./models/User";
 import { assignFeeStructureToStudents } from "./utils/schoolFeeLedger";
+import { getCurrentAcademicYear } from "./utils/academicYear";
 import { encryptSecretForStorage, generateBackupCodes } from "./utils/totp";
 
-const ACADEMIC_YEAR = "2025-26";
+const ACADEMIC_YEAR = getCurrentAcademicYear();
+const START_YEAR = ACADEMIC_YEAR.slice(0, 4);
 /** Base32 secret used for seeded super-admin 2FA in development/E2E. */
 const SEED_SUPER_ADMIN_TOTP_SECRET = "JBSWY3DPEHPK3PXP";
 
@@ -158,7 +160,7 @@ const seed = async (): Promise<void> => {
         busId: buses[busIndex]._id,
         monthlyTransportFee: fee,
         pickupStop,
-        effectiveFrom: new Date("2025-04-01T00:00:00.000Z"),
+        effectiveFrom: new Date(`${START_YEAR}-04-01T00:00:00.000Z`),
         effectiveTo: null,
         status: "active" as const,
         academicYear: ACADEMIC_YEAR,
@@ -173,7 +175,7 @@ const seed = async (): Promise<void> => {
   );
 
   console.log("Creating fee payments for transport-registered students...");
-  const months = ["2025-04", "2025-05", "2025-06", "2025-07", "2025-08"];
+  const months = [`${START_YEAR}-04`, `${START_YEAR}-05`, `${START_YEAR}-06`, `${START_YEAR}-07`, `${START_YEAR}-08`];
   const statusCycle: FeePaymentStatus[] = ["paid", "partial", "pending", "overdue"];
 
   const feePaymentPayload = transports.flatMap((transport, transportIndex) =>
@@ -228,7 +230,7 @@ const seed = async (): Promise<void> => {
       busId: bus._id,
       category: "diesel" as const,
       amount: 9000,
-      date: new Date("2025-04-05T10:00:00.000Z"),
+      date: new Date(`${START_YEAR}-04-05T10:00:00.000Z`),
       vendor: "Local Fuel Station",
       notes: "Monthly diesel refill",
       academicYear: ACADEMIC_YEAR,
@@ -239,7 +241,7 @@ const seed = async (): Promise<void> => {
       busId: bus._id,
       category: "maintenance" as const,
       amount: 3500,
-      date: new Date("2025-04-15T10:00:00.000Z"),
+      date: new Date(`${START_YEAR}-04-15T10:00:00.000Z`),
       vendor: "City Auto Garage",
       notes: "Routine maintenance",
       academicYear: ACADEMIC_YEAR,
@@ -250,7 +252,7 @@ const seed = async (): Promise<void> => {
       busId: bus._id,
       category: "other" as const,
       amount: 1200,
-      date: new Date("2025-04-20T10:00:00.000Z"),
+      date: new Date(`${START_YEAR}-04-20T10:00:00.000Z`),
       vendor: "Accessories Shop",
       notes: "Cleaning and accessories",
       academicYear: ACADEMIC_YEAR,
@@ -263,7 +265,7 @@ const seed = async (): Promise<void> => {
   console.log("Creating school fee structure...");
   const feeStructure = await FeeStructure.create({
     organizationId: orgId,
-    name: "Standard Fee Structure 2025-26",
+    name: `Standard Fee Structure ${ACADEMIC_YEAR}`,
     academicYear: ACADEMIC_YEAR,
     applicableGrades: [],
     feeHeads: [
@@ -309,7 +311,7 @@ const seed = async (): Promise<void> => {
   const aprilLedger = await FeeLedger.findOne({
     studentId: student1._id,
     feeHeadName: "Tuition Fee",
-    periodLabel: "2025-04",
+    periodLabel: `${START_YEAR}-04`,
     academicYear: ACADEMIC_YEAR
   });
   if (aprilLedger) {
@@ -320,13 +322,13 @@ const seed = async (): Promise<void> => {
       studentId: student1._id,
       receiptNumber: "RCP-SEED-SAMPLE01",
       academicYear: ACADEMIC_YEAR,
-      paymentDate: new Date("2025-04-08T10:00:00.000Z"),
+      paymentDate: new Date(`${START_YEAR}-04-08T10:00:00.000Z`),
       paymentMode: "cash",
       collectedBy: staff._id,
       feeHeadPayments: [
         {
           feeHeadName: "Tuition Fee",
-          periodLabel: "2025-04",
+          periodLabel: `${START_YEAR}-04`,
           amountDue: aprilLedger.amountDue,
           amountPaid: aprilLedger.amountDue,
           lateFee: 0,

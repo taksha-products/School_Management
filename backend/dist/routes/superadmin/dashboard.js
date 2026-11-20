@@ -9,6 +9,8 @@ const SchoolFeePayment_1 = require("../../models/SchoolFeePayment");
 const Student_1 = require("../../models/Student");
 const asyncHandler_1 = require("../../utils/asyncHandler");
 const dashboardRouter = (0, express_1.Router)();
+/** Soft-deleted organizations are excluded from all dashboard metrics. */
+const notDeletedFilter = { deletedAt: { $exists: false } };
 const getCurrentMonthRange = () => {
     const now = new Date();
     return {
@@ -19,15 +21,19 @@ const getCurrentMonthRange = () => {
 const sumAggregationTotal = (result) => result[0]?.total ?? 0;
 dashboardRouter.get("/", auth_1.auth, roleCheck_1.isSuperAdmin, (0, asyncHandler_1.asyncHandler)(async (_req, res) => {
     const { start, end } = getCurrentMonthRange();
-    const [totalOrganizations, totalStudents, activePlans, transportRevenueAgg, schoolRevenueAgg, organizations] = await Promise.all([
-        Organization_1.Organization.countDocuments(),
-        Student_1.Student.countDocuments(),
-        Organization_1.Organization.countDocuments({ isActive: true }),
+    const activeOrganizationIds = await Organization_1.Organization.find(notDeletedFilter).distinct("_id");
+    const [totalOrganizations, totalStudents, activeOrganizations, transportRevenueAgg, schoolRevenueAgg, organizations] = await Promise.all([
+        Organization_1.Organization.countDocuments(notDeletedFilter),
+        activeOrganizationIds.length === 0
+            ? Promise.resolve(0)
+            : Student_1.Student.countDocuments({ organizationId: { $in: activeOrganizationIds } }),
+        Organization_1.Organization.countDocuments({ ...notDeletedFilter, isActive: true }),
         FeePayment_1.FeePayment.aggregate([
             {
                 $match: {
                     status: "paid",
-                    createdAt: { $gte: start, $lt: end }
+                    createdAt: { $gte: start, $lt: end },
+                    organizationId: { $in: activeOrganizationIds }
                 }
             },
             { $group: { _id: null, total: { $sum: "$amountPaid" } } }
@@ -36,12 +42,14 @@ dashboardRouter.get("/", auth_1.auth, roleCheck_1.isSuperAdmin, (0, asyncHandler
             {
                 $match: {
                     paymentStatus: "completed",
-                    createdAt: { $gte: start, $lt: end }
+                    createdAt: { $gte: start, $lt: end },
+                    organizationId: { $in: activeOrganizationIds }
                 }
             },
             { $group: { _id: null, total: { $sum: "$totalAmountPaid" } } }
         ]),
         Organization_1.Organization.aggregate([
+            { $match: notDeletedFilter },
             {
                 $lookup: {
                     from: "students",
@@ -71,7 +79,7 @@ dashboardRouter.get("/", auth_1.auth, roleCheck_1.isSuperAdmin, (0, asyncHandler
             stats: {
                 totalOrganizations,
                 totalStudents,
-                activePlans,
+                activeOrganizations,
                 monthlyRevenue
             },
             organizations

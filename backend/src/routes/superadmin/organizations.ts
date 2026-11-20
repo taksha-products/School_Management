@@ -1,6 +1,5 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
-import crypto from "crypto";
 import { Types } from "mongoose";
 
 import { auth } from "../../middleware/auth";
@@ -21,6 +20,7 @@ import { resolveOrgGradeConfig } from "../../utils/orgGradeConfig";
 import { User } from "../../models/User";
 import { RefreshToken } from "../../models/RefreshToken";
 import { asyncHandler } from "../../utils/asyncHandler";
+import { generateTemporaryPassword } from "../../utils/generateTemporaryPassword";
 import { generateUniqueOrgCode } from "../../utils/orgCode";
 import { paginateArray, parsePaginationQuery } from "../../utils/paginate";
 import { getOrgTheme } from "../../services/orgThemeService";
@@ -234,7 +234,7 @@ organizationsRouter.post(
 
     const slug = code.split("-").slice(0, -1).join("-") || code;
     const adminEmail = email || `admin@${slug}.local`;
-    const temporaryPassword = crypto.randomBytes(4).toString("hex");
+    const temporaryPassword = generateTemporaryPassword();
 
     const orgAdmin = await User.create({
       name: `${name} Admin`,

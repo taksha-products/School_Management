@@ -1,5 +1,3 @@
-export const ACADEMIC_YEAR = "2025-26";
-
 export const GRADE_OPTIONS = ["All", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"];
 
 export const FEE_HEAD_PRESETS = [

@@ -8,17 +8,14 @@ interface FeesPageProps {
 }
 
 const FeesPage = ({ searchParams }: FeesPageProps): never => {
-  const params = new URLSearchParams();
-
   if (searchParams?.studentId) {
-    params.set("studentId", searchParams.studentId);
+    if (searchParams.tab === "transport") {
+      redirect("/admin/fees/collect?tab=transport");
+    }
+    redirect(`/admin/fees/collect/${searchParams.studentId}`);
   }
   if (searchParams?.tab === "transport") {
-    params.set("tab", "transport");
-  }
-
-  if (params.size > 0) {
-    redirect(`/admin/fees/collect?${params.toString()}`);
+    redirect("/admin/fees/collect?tab=transport");
   }
 
   redirect("/admin/fees/outstanding");

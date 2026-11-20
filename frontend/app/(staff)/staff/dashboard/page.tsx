@@ -4,17 +4,18 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { IndianRupee, Users } from "lucide-react";
 
+import { useAcademicYear } from "@/hooks/useAcademicYear";
 import { KpiStatCard } from "@/components/dashboard/KpiStatCard";
 import { PageWrapper } from "@/components/layout/PageWrapper";
 import { Card } from "@/components/ui/Card";
 import { canDo } from "@/lib/auth";
-import { ACADEMIC_YEAR } from "@/lib/constants";
 import { api } from "@/lib/api";
 import { formatINR } from "@/lib/utils";
 import type { DashboardSummary } from "@/types";
 import type { OutstandingStudent } from "@/types/schoolFees";
 
 const StaffDashboardPage = (): JSX.Element => {
+  const orgAcademicYear = useAcademicYear();
   const month = new Date().toISOString().slice(0, 7);
 
   const summaryQuery = useQuery({
@@ -22,7 +23,7 @@ const StaffDashboardPage = (): JSX.Element => {
     queryFn: async () =>
       (
         await api.get<{ data: DashboardSummary }>("/api/reports/summary", {
-          params: { month, academicYear: ACADEMIC_YEAR }
+          params: { month, academicYear: orgAcademicYear }
         })
       ).data.data,
     enabled: canDo("canViewReports")
@@ -33,7 +34,7 @@ const StaffDashboardPage = (): JSX.Element => {
     queryFn: async () =>
       (
         await api.get<{ data: OutstandingStudent[] }>("/api/school-fees/outstanding", {
-          params: { academicYear: ACADEMIC_YEAR, page: 1, limit: 5 }
+          params: { academicYear: orgAcademicYear, page: 1, limit: 5 }
         })
       ).data.data,
     enabled: canDo("canCollectFees")

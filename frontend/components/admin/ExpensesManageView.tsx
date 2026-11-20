@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState, type JSX } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
+import { useAcademicYear } from "@/hooks/useAcademicYear";
 import { ListPagination } from "@/components/shared/ListPagination";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -28,17 +29,17 @@ const expenseSchema = z.object({
 });
 type ExpenseForm = z.infer<typeof expenseSchema>;
 
-const defaultFormValues: ExpenseForm = {
+const defaultFormValues: Omit<ExpenseForm, "academicYear"> = {
   busId: "",
   category: "diesel",
   amount: 0,
   date: new Date().toISOString().slice(0, 10),
   vendor: "",
-  notes: "",
-  academicYear: "2025-26"
+  notes: ""
 };
 
 export const ExpensesManageView = (): JSX.Element => {
+  const orgAcademicYear = useAcademicYear();
   const { showToast } = useToast();
   const queryClient = useQueryClient();
   const [busId, setBusId] = useState("");
@@ -54,7 +55,7 @@ export const ExpensesManageView = (): JSX.Element => {
 
   const form = useForm<ExpenseForm>({
     resolver: zodResolver(expenseSchema),
-    defaultValues: defaultFormValues
+    defaultValues: { ...defaultFormValues, academicYear: orgAcademicYear }
   });
 
   const busesQuery = useQuery({
@@ -63,7 +64,7 @@ export const ExpensesManageView = (): JSX.Element => {
   });
 
   const expensesQuery = useQuery({
-    queryKey: ["expenses", { page, busId, month, category }],
+    queryKey: ["expenses", { page, busId, month, category, academicYear: orgAcademicYear }],
     queryFn: async () =>
       (
         await api.get<PaginatedResponse<Expense>>("/api/expenses", {
@@ -71,7 +72,7 @@ export const ExpensesManageView = (): JSX.Element => {
             busId: busId || undefined,
             month,
             category: category || undefined,
-            academicYear: "2025-26",
+            academicYear: orgAcademicYear,
             page,
             limit: 30
           }
@@ -86,12 +87,12 @@ export const ExpensesManageView = (): JSX.Element => {
   const closeForm = (): void => {
     setFormOpen(false);
     setEditingId(null);
-    form.reset(defaultFormValues);
+    form.reset({ ...defaultFormValues, academicYear: orgAcademicYear });
   };
 
   const openCreateForm = (): void => {
     setEditingId(null);
-    form.reset(defaultFormValues);
+    form.reset({ ...defaultFormValues, academicYear: orgAcademicYear });
     setFormOpen(true);
   };
 

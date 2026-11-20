@@ -10,6 +10,7 @@ import { createServer } from "http";
 import "dotenv/config";
 
 import { connectDB } from "./config/db";
+import { syncCriticalIndexes } from "./config/syncIndexes";
 import { initRedis } from "./config/redis";
 import { initSocketServer } from "./config/socket";
 import authRouter from "./routes/auth";
@@ -145,7 +146,19 @@ app.use(
     });
 
     if (err.code === 11000 && err.keyValue) {
-      const field = Object.keys(err.keyValue)[0];
+      const keyValue = err.keyValue as Record<string, unknown>;
+      const fields = Object.keys(keyValue);
+
+      if (fields.includes("busNumber")) {
+        res.status(400).json({
+          success: false,
+          data: null,
+          message: "A bus with this number already exists in your organization."
+        });
+        return;
+      }
+
+      const field = fields[0] ?? "field";
       res.status(400).json({
         success: false,
         data: null,
@@ -180,6 +193,7 @@ app.use(
 
 const startServer = async (): Promise<void> => {
   await connectDB();
+  await syncCriticalIndexes();
   await initRedis();
 
   const httpServer = createServer(app);

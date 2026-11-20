@@ -1,11 +1,8 @@
 import type { Metadata } from "next";
-import { DM_Sans } from "next/font/google";
 import type { JSX, ReactNode } from "react";
 
 import "./globals.css";
 import { AppProviders } from "@/components/providers/AppProviders";
-
-const dmSans = DM_Sans({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "TAKSHA",
@@ -19,7 +16,7 @@ export default function RootLayout({
 }>): JSX.Element {
   return (
     <html lang="en">
-      <body className={dmSans.className}>
+      <body className="font-sans antialiased">
         <AppProviders>{children}</AppProviders>
       </body>
     </html>

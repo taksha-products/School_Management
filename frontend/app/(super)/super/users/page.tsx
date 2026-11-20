@@ -1,14 +1,27 @@
 "use client";
 
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type JSX } from "react";
 
-import { ListPagination } from "@/components/shared/ListPagination";
-import { PageWrapper } from "@/components/layout/PageWrapper";
-import { Card } from "@/components/ui/Card";
+import { SuperPageWrapper } from "@/components/layout/SuperPageWrapper";
+import { SuperAdminListPagination } from "@/components/superadmin/SuperAdminListPagination";
+import { SuperAdminSectionCard } from "@/components/superadmin/SuperAdminSectionCard";
+import {
+  SuperAdminStatusBadge,
+  superAdminFilterSelectClass,
+  superAdminTableHeadClass
+} from "@/components/superadmin/SuperAdminStatusBadge";
+import { TableSkeleton } from "@/components/ui/TableSkeleton";
+import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import type { PaginatedResponse } from "@/types/pagination";
 import type { OrgUser } from "@/types/schoolFees";
+
+const formatRoleLabel = (role: string): string => {
+  if (role === "superAdmin") return "Super Admin";
+  if (role === "orgAdmin") return "Org Admin";
+  return role.charAt(0).toUpperCase() + role.slice(1);
+};
 
 const SuperUsersPage = (): JSX.Element => {
   const [roleFilter, setRoleFilter] = useState("");
@@ -60,64 +73,97 @@ const SuperUsersPage = (): JSX.Element => {
   const pagination = usersQuery.data?.pagination;
 
   return (
-    <PageWrapper title="All Users">
-      <Card>
-        <div className="mb-4 flex flex-wrap gap-2">
-          <select
-            value={roleFilter}
-            onChange={(e) => setRoleFilter(e.target.value)}
-            className="rounded border px-3 py-2 text-sm"
-          >
-            <option value="">All roles</option>
-            <option value="superAdmin">Super Admin</option>
-            <option value="orgAdmin">Org Admin</option>
-            <option value="staff">Staff</option>
-            <option value="parent">Parent</option>
-          </select>
-          <select
-            value={orgFilter}
-            onChange={(e) => setOrgFilter(e.target.value)}
-            className="rounded border px-3 py-2 text-sm"
-          >
-            <option value="">All organizations</option>
-            {orgs.map(([id, name]) => (
-              <option key={id} value={id}>
-                {name}
-              </option>
-            ))}
-          </select>
+    <SuperPageWrapper title="All Users" subtitle="Platform-wide user directory">
+      <SuperAdminSectionCard>
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="text-lg font-semibold tracking-tight text-gray-900">User directory</h2>
+          <div className="flex flex-wrap gap-2">
+            <select
+              value={roleFilter}
+              onChange={(e) => setRoleFilter(e.target.value)}
+              className={superAdminFilterSelectClass}
+            >
+              <option value="">All roles</option>
+              <option value="superAdmin">Super Admin</option>
+              <option value="orgAdmin">Org Admin</option>
+              <option value="staff">Staff</option>
+              <option value="parent">Parent</option>
+            </select>
+            <select
+              value={orgFilter}
+              onChange={(e) => setOrgFilter(e.target.value)}
+              className={cn(superAdminFilterSelectClass, "min-w-[12rem]")}
+            >
+              <option value="">All organizations</option>
+              {orgs.map(([id, name]) => (
+                <option key={id} value={id}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
-        <table className="w-full text-sm">
-          <thead className="text-left text-slate-500">
-            <tr>
-              <th className="p-2">Name</th>
-              <th>Email</th>
-              <th>Role</th>
-              <th>Organization</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.map((user) => (
-              <tr key={user._id} className="border-t border-slate-100">
-                <td className="p-2 font-medium">{user.name}</td>
-                <td>{user.email}</td>
-                <td className="capitalize">{user.role}</td>
-                <td>
-                  {typeof user.organizationId === "object"
-                    ? user.organizationId?.name ?? "—"
-                    : "—"}
-                </td>
-                <td>{user.isActive ? "Active" : "Inactive"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {pagination && (
-          <ListPagination pagination={pagination} noun="users" onPageChange={setPage} />
+
+        {usersQuery.isLoading ? (
+          <TableSkeleton />
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <div className="min-w-[720px] overflow-hidden rounded-md border border-gray-200">
+                <table className="w-full table-fixed text-left text-sm">
+                  <colgroup>
+                    <col className="w-[22%]" />
+                    <col className="w-[28%]" />
+                    <col className="w-[14%]" />
+                    <col className="w-[22%]" />
+                    <col className="w-[14%]" />
+                  </colgroup>
+                  <thead>
+                    <tr className="bg-[#F9FAFB]">
+                      <th className={superAdminTableHeadClass}>Name</th>
+                      <th className={superAdminTableHeadClass}>Email</th>
+                      <th className={superAdminTableHeadClass}>Role</th>
+                      <th className={superAdminTableHeadClass}>Organization</th>
+                      <th className={superAdminTableHeadClass}>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 bg-white">
+                    {users.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="px-4 py-10 text-center text-sm text-gray-500">
+                          No users match your filters.
+                        </td>
+                      </tr>
+                    ) : (
+                      users.map((user, index) => (
+                        <tr key={user._id} className={cn(index % 2 === 1 && "bg-[#FAFAFA]")}>
+                          <td className="truncate px-4 py-3 font-semibold text-gray-900">
+                            {user.name}
+                          </td>
+                          <td className="truncate px-4 py-3 text-gray-600">{user.email}</td>
+                          <td className="px-4 py-3 text-gray-600">{formatRoleLabel(user.role)}</td>
+                          <td className="truncate px-4 py-3 text-gray-600">
+                            {typeof user.organizationId === "object"
+                              ? (user.organizationId?.name ?? "—")
+                              : "—"}
+                          </td>
+                          <td className="px-4 py-3">
+                            <SuperAdminStatusBadge active={user.isActive} />
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            {pagination && (
+              <SuperAdminListPagination pagination={pagination} noun="users" onPageChange={setPage} />
+            )}
+          </>
         )}
-      </Card>
-    </PageWrapper>
+      </SuperAdminSectionCard>
+    </SuperPageWrapper>
   );
 };
 

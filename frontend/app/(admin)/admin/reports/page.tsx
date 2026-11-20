@@ -21,6 +21,7 @@ import {
 } from "recharts";
 import { z } from "zod";
 
+import { useAcademicYearState } from "@/hooks/useAcademicYear";
 import { PageWrapper } from "@/components/layout/PageWrapper";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -33,7 +34,6 @@ import { downloadCsv } from "@/lib/fileDownload";
 import { cn, formatINR } from "@/lib/utils";
 import type { Bus, BusTrend, DashboardSummary, FeePayment, MonthlyReport } from "@/types";
 
-const DEFAULT_ACADEMIC = "2025-26";
 
 function defaultMonth(): string {
   return new Date().toISOString().slice(0, 7);
@@ -89,7 +89,7 @@ const ReportsPageContent = (): JSX.Element => {
   const { showToast } = useToast();
 
   const [month, setMonth] = useState(defaultMonth);
-  const [academicYear, setAcademicYear] = useState(DEFAULT_ACADEMIC);
+  const [academicYear, setAcademicYear] = useAcademicYearState();
   const [busFilter, setBusFilter] = useState<string>("");
   const [sortKey, setSortKey] = useState<SortKey>("netProfit");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");

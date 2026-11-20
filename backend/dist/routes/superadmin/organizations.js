@@ -5,7 +5,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
-const crypto_1 = __importDefault(require("crypto"));
 const mongoose_1 = require("mongoose");
 const auth_1 = require("../../middleware/auth");
 const featureFlag_1 = require("../../middleware/featureFlag");
@@ -17,6 +16,7 @@ const orgGradeConfig_1 = require("../../utils/orgGradeConfig");
 const User_1 = require("../../models/User");
 const RefreshToken_1 = require("../../models/RefreshToken");
 const asyncHandler_1 = require("../../utils/asyncHandler");
+const generateTemporaryPassword_1 = require("../../utils/generateTemporaryPassword");
 const orgCode_1 = require("../../utils/orgCode");
 const paginate_1 = require("../../utils/paginate");
 const orgThemeService_1 = require("../../services/orgThemeService");
@@ -167,7 +167,7 @@ organizationsRouter.post("/", auth_1.auth, roleCheck_1.isSuperAdmin, (0, asyncHa
     });
     const slug = code.split("-").slice(0, -1).join("-") || code;
     const adminEmail = email || `admin@${slug}.local`;
-    const temporaryPassword = crypto_1.default.randomBytes(4).toString("hex");
+    const temporaryPassword = (0, generateTemporaryPassword_1.generateTemporaryPassword)();
     const orgAdmin = await User_1.User.create({
         name: `${name} Admin`,
         email: adminEmail.toLowerCase(),

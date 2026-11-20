@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getOrgBrandingLabel = exports.invalidateOrgThemeCache = exports.getOrgTheme = void 0;
+exports.getOrgBrandingLabel = exports.getOrgReceiptBranding = exports.invalidateOrgThemeCache = exports.getOrgTheme = void 0;
 const Organization_1 = require("../models/Organization");
 const cache_1 = require("../utils/cache");
 const THEME_CACHE_SUFFIX = "theme";
@@ -29,6 +29,22 @@ const invalidateOrgThemeCache = async (organizationId) => {
     await (0, cache_1.deleteCached)((0, cache_1.orgCacheKey)(organizationId, THEME_CACHE_SUFFIX));
 };
 exports.invalidateOrgThemeCache = invalidateOrgThemeCache;
+const getOrgReceiptBranding = async (organizationId) => {
+    const org = await Organization_1.Organization.findById(organizationId).select("name logoUrl brandColor displayName address phone email");
+    if (!org) {
+        return null;
+    }
+    return {
+        logoUrl: org.logoUrl ?? null,
+        brandColor: org.brandColor ?? null,
+        displayName: org.displayName ?? null,
+        orgName: org.name,
+        address: org.address ?? null,
+        phone: org.phone ?? null,
+        email: org.email ?? null
+    };
+};
+exports.getOrgReceiptBranding = getOrgReceiptBranding;
 const getOrgBrandingLabel = async (organizationId) => {
     const theme = await (0, exports.getOrgTheme)(organizationId);
     if (!theme) {

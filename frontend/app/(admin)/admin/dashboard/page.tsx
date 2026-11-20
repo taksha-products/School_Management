@@ -22,6 +22,7 @@ import {
 } from "recharts";
 import { z } from "zod";
 
+import { useAcademicYear } from "@/hooks/useAcademicYear";
 import { KpiStatCard } from "@/components/dashboard/KpiStatCard";
 import { PageWrapper } from "@/components/layout/PageWrapper";
 import { Badge } from "@/components/ui/Badge";
@@ -43,7 +44,6 @@ import { colors } from "@/lib/colors";
 import { cn, formatINR } from "@/lib/utils";
 import type { DashboardSummary, Expense, FeePayment, MonthlyReport } from "@/types";
 
-const ACADEMIC_YEAR = "2025-26";
 
 function getCurrentMonthKey(): string {
   return new Date().toISOString().slice(0, 7);
@@ -71,6 +71,7 @@ const pctColor = (pct: number): string => {
 };
 
 const AdminDashboardPage = (): JSX.Element => {
+  const orgAcademicYear = useAcademicYear();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const currentMonth = useMemo(() => getCurrentMonthKey(), []);
@@ -80,19 +81,19 @@ const AdminDashboardPage = (): JSX.Element => {
   });
 
   const summaryQuery = useQuery({
-    queryKey: ["dashboard-summary", currentMonth, ACADEMIC_YEAR],
+    queryKey: ["dashboard-summary", currentMonth, orgAcademicYear],
     queryFn: async () =>
       (await api.get<{ data: DashboardSummary }>("/api/reports/summary", {
-        params: { month: currentMonth, academicYear: ACADEMIC_YEAR }
+        params: { month: currentMonth, academicYear: orgAcademicYear }
       })).data.data
   });
 
   const monthlyQuery = useQuery({
-    queryKey: ["dashboard-monthly", currentMonth, ACADEMIC_YEAR],
+    queryKey: ["dashboard-monthly", currentMonth, orgAcademicYear],
     queryFn: async () =>
       (
         await api.get<{ data: MonthlyReport[] }>("/api/reports/monthly", {
-          params: { month: currentMonth, academicYear: ACADEMIC_YEAR }
+          params: { month: currentMonth, academicYear: orgAcademicYear }
         })
       ).data.data
   });
@@ -108,11 +109,11 @@ const AdminDashboardPage = (): JSX.Element => {
   });
 
   const expensesQuery = useQuery({
-    queryKey: ["dashboard-expenses", currentMonth, ACADEMIC_YEAR],
+    queryKey: ["dashboard-expenses", currentMonth, orgAcademicYear],
     queryFn: async () =>
       (
         await api.get<{ data: Expense[] }>("/api/expenses", {
-          params: { month: currentMonth, academicYear: ACADEMIC_YEAR, page: 1, limit: 100 }
+          params: { month: currentMonth, academicYear: orgAcademicYear, page: 1, limit: 100 }
         })
       ).data.data
   });
@@ -120,12 +121,12 @@ const AdminDashboardPage = (): JSX.Element => {
   const trendMonths = useMemo(() => lastNMonths(6), []);
 
   const sixMonthTrendQuery = useQuery({
-    queryKey: ["dashboard-6m-trend", trendMonths.join(","), ACADEMIC_YEAR],
+    queryKey: ["dashboard-6m-trend", trendMonths.join(","), orgAcademicYear],
     queryFn: async () => {
       const res = await api.get<{
         data: Array<{ month: string; totalFeesCollected: number; totalExpenses: number }>;
       }>("/api/reports/monthly-trend", {
-        params: { months: trendMonths.join(","), academicYear: ACADEMIC_YEAR }
+        params: { months: trendMonths.join(","), academicYear: orgAcademicYear }
       });
       return res.data.data.map((point) => ({
         monthKey: point.month,
@@ -242,7 +243,7 @@ const AdminDashboardPage = (): JSX.Element => {
   return (
     <PageWrapper
       title="Dashboard"
-      subtitle={`Financial snapshot for ${monthLabel} · Academic year ${ACADEMIC_YEAR}`}
+      subtitle={`Financial snapshot for ${monthLabel} · Academic year ${orgAcademicYear}`}
     >
       {loadingMain ? (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -557,7 +558,7 @@ const AdminDashboardPage = (): JSX.Element => {
       </Modal>
 
       <div className="flex justify-end">
-        <Link href={`/admin/reports?month=${currentMonth}&academicYear=${ACADEMIC_YEAR}`}>
+        <Link href={`/admin/reports?month=${currentMonth}&academicYear=${orgAcademicYear}`}>
           <Button variant="secondary">Full reports →</Button>
         </Link>
       </div>

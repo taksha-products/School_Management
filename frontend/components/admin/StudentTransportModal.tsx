@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
@@ -120,12 +120,30 @@ export const StudentTransportModal = ({ student, isOpen, onClose }: Props): JSX.
     onError: () => showToast("error", "Failed to remove transport")
   });
 
+  const current = transportQuery.data?.current;
+  const history = transportQuery.data?.history ?? [];
+
+  const selectedBus = useMemo(
+    () => (busesQuery.data ?? []).find((bus) => bus._id === busId),
+    [busesQuery.data, busId]
+  );
+
+  const currentBusId =
+    current && typeof current.busId !== "string" ? current.busId._id : current?.busId;
+
+  const additionalSeats =
+    mode === "change" && busId && currentBusId && busId === currentBusId ? 0 : 1;
+
+  const busCapacityExceeded = !!(
+    selectedBus &&
+    selectedBus.capacity > 0 &&
+    (selectedBus.activeStudentCount ?? 0) + additionalSeats > selectedBus.capacity
+  );
+
   if (!student) {
     return null;
   }
 
-  const current = transportQuery.data?.current;
-  const history = transportQuery.data?.history ?? [];
   const currentBus =
     current && typeof current.busId !== "string"
       ? current.busId
@@ -170,10 +188,22 @@ export const StudentTransportModal = ({ student, isOpen, onClose }: Props): JSX.
         onChange={(e) => setEffectiveFrom(e.target.value)}
         className="rounded border border-slate-200 px-3 py-2"
       />
+      {selectedBus && (
+        <p className="text-sm text-slate-600">
+          Capacity: {(selectedBus.activeStudentCount ?? 0) + additionalSeats}/{selectedBus.capacity}
+        </p>
+      )}
+      {busCapacityExceeded && (
+        <p className="text-sm font-semibold text-red-700">
+          This bus is full. Choose another bus or free seats first.
+        </p>
+      )}
       <div className="flex gap-2">
         <Button
           onClick={() => (mode === "register" ? registerMutation.mutate() : changeMutation.mutate())}
-          disabled={!busId || registerMutation.isPending || changeMutation.isPending}
+          disabled={
+            !busId || busCapacityExceeded || registerMutation.isPending || changeMutation.isPending
+          }
         >
           Save
         </Button>

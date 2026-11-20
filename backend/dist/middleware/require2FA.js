@@ -1,8 +1,8 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.blockSuperAdmin2FADisable = exports.require2FA = void 0;
+const twoFactor_1 = require("../constants/twoFactor");
 const User_1 = require("../models/User");
-const VERIFICATION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 /**
  * Ensures super-admin users have 2FA enabled and verified within the last 24 hours.
  * Must run after {@link auth} middleware.
@@ -46,7 +46,7 @@ const require2FA = async (req, res, next) => {
         return;
     }
     const verifiedAt = user.twoFactorVerifiedAt.getTime();
-    const isRecent = Date.now() - verifiedAt <= VERIFICATION_MAX_AGE_MS;
+    const isRecent = Date.now() - verifiedAt <= twoFactor_1.TWO_FACTOR_VERIFICATION_MAX_AGE_MS;
     if (!isRecent) {
         res.status(403).json({
             success: false,

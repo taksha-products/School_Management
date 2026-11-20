@@ -1,6 +1,7 @@
 import { model, Schema, type Document } from "mongoose";
 
 import type { InstitutionType } from "../constants/institutionTemplates";
+import { getCurrentAcademicYear } from "../utils/academicYear";
 
 export type OrganizationPlan = "trial" | "basic" | "pro" | "cancelled";
 
@@ -124,7 +125,7 @@ const organizationSchema = new Schema<IOrganization>(
     plan: { type: String, enum: ["trial", "basic", "pro", "cancelled"], default: "trial" },
     isActive: { type: Boolean, default: true },
     deletedAt: { type: Date },
-    currentAcademicYear: { type: String, default: "2025-26" },
+    currentAcademicYear: { type: String, default: () => getCurrentAcademicYear() },
     institutionType: {
       type: String,
       enum: ["school", "college", "other"],

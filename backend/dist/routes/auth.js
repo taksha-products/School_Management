@@ -20,6 +20,7 @@ const jwt_1 = require("../utils/jwt");
 const tokenHash_1 = require("../utils/tokenHash");
 const totp_1 = require("../utils/totp");
 const twoFactorRedis_1 = require("../utils/twoFactorRedis");
+const twoFactor_1 = require("../constants/twoFactor");
 const auth_2 = require("../validators/auth");
 const authRouter = (0, express_1.Router)();
 const loginLimiter = (0, express_rate_limit_1.default)({
@@ -131,7 +132,12 @@ authRouter.post("/login", loginLimiter, auth_2.loginValidation, validate_1.valid
             return;
         }
         const publicUser = await issueSession(user, req, res);
-        res.json({ success: true, user: publicUser });
+        const requires2FASetup = user.role === "superAdmin" && !user.twoFactorEnabled;
+        res.json({
+            success: true,
+            user: publicUser,
+            ...(requires2FASetup ? { requires2FASetup: true } : {})
+        });
     }
     catch (error) {
         const message = error instanceof Error ? error.message : "Authentication failed";
@@ -491,6 +497,76 @@ authRouter.post("/2fa/disable", auth_1.auth, require2FA_1.blockSuperAdmin2FADisa
     await user.save();
     res.json({ success: true });
 }));
+const isSuperAdminVerificationExpired = (verifiedAt) => {
+    if (!verifiedAt) {
+        return true;
+    }
+    return Date.now() - verifiedAt.getTime() > twoFactor_1.TWO_FACTOR_VERIFICATION_MAX_AGE_MS;
+};
+authRouter.post("/2fa/reverify", auth_1.auth, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    const authReq = req;
+    if (!authReq.user) {
+        res.status(401).json({ success: false, message: "Unauthorized" });
+        return;
+    }
+    if (authReq.user.role !== "superAdmin") {
+        res.status(403).json({
+            success: false,
+            error: "2FA re-verification is only required for super admin accounts",
+            code: "2FA_REVERIFY_NOT_REQUIRED"
+        });
+        return;
+    }
+    const { code } = req.body;
+    if (!code || typeof code !== "string") {
+        res.status(400).json({ success: false, error: "Verification code is required" });
+        return;
+    }
+    if (await (0, twoFactorRedis_1.is2FAAttemptsExceeded)(authReq.user.userId)) {
+        res.status(429).json({
+            success: false,
+            error: "Too many 2FA attempts. Please try again later.",
+            code: "2FA_RATE_LIMITED"
+        });
+        return;
+    }
+    const user = await User_1.User.findById(authReq.user.userId).select("+twoFactorSecret +backupCodes twoFactorEnabled");
+    if (!user || !user.twoFactorEnabled || !user.twoFactorSecret) {
+        res.status(403).json({
+            success: false,
+            error: "Two-factor authentication setup is required for super admin accounts",
+            code: "2FA_SETUP_REQUIRED"
+        });
+        return;
+    }
+    let verified = false;
+    if ((0, totp_1.isBackupCodeFormat)(code)) {
+        const backupResult = await (0, totp_1.verifyBackupCode)(code, user.backupCodes ?? []);
+        if (backupResult.valid) {
+            user.backupCodes = backupResult.remainingCodes;
+            verified = true;
+        }
+    }
+    else if (/^\d{6}$/.test(code.trim())) {
+        const secret = (0, totp_1.decryptSecretFromStorage)(user.twoFactorSecret);
+        verified = (0, totp_1.verifyToken)(secret, code.trim());
+    }
+    if (!verified) {
+        res.status(401).json({
+            success: false,
+            error: "Invalid 2FA code",
+            code: "2FA_INVALID"
+        });
+        return;
+    }
+    await (0, twoFactorRedis_1.clear2FAAttempts)(authReq.user.userId);
+    user.twoFactorVerifiedAt = new Date();
+    await user.save();
+    res.json({
+        success: true,
+        verifiedAt: user.twoFactorVerifiedAt
+    });
+}));
 authRouter.get("/2fa/status", auth_1.auth, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     const authReq = req;
     if (!authReq.user) {
@@ -502,11 +578,16 @@ authRouter.get("/2fa/status", auth_1.auth, (0, asyncHandler_1.asyncHandler)(asyn
         res.status(404).json({ success: false, message: "User not found" });
         return;
     }
+    const isSuperAdmin = authReq.user.role === "superAdmin";
+    const needsSetup = isSuperAdmin && !user.twoFactorEnabled;
+    const needsReverify = isSuperAdmin && user.twoFactorEnabled && isSuperAdminVerificationExpired(user.twoFactorVerifiedAt);
     res.json({
         success: true,
         enabled: user.twoFactorEnabled,
         verifiedAt: user.twoFactorVerifiedAt ?? null,
-        backupCodesRemaining: user.twoFactorEnabled ? (user.backupCodes?.length ?? 0) : 0
+        backupCodesRemaining: user.twoFactorEnabled ? (user.backupCodes?.length ?? 0) : 0,
+        needsSetup,
+        needsReverify
     });
 }));
 exports.default = authRouter;

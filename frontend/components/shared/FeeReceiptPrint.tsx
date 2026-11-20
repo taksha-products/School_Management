@@ -1,10 +1,12 @@
 "use client";
 
-import type { JSX } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useRef, useState, type JSX } from "react";
 
-import { Button } from "@/components/ui/Button";
-import { ReceiptOrgHeader } from "@/components/shared/BrandLogo";
-import { formatINR } from "@/lib/utils";
+import { FeeReceiptCard } from "@/components/shared/FeeReceiptCard";
+import { useToast } from "@/components/ui/Toast";
+import { downloadReceiptPdf } from "@/lib/downloadReceiptPdf";
+import { formatReceiptDisplayId, schoolReceiptPeriodLabel } from "@/lib/receiptFormat";
 import type { SchoolFeeReceipt } from "@/types/schoolFees";
 
 interface FeeReceiptPrintProps {
@@ -13,100 +15,88 @@ interface FeeReceiptPrintProps {
   showPrintButton?: boolean;
 }
 
-const formatDate = (date?: string): string =>
-  date
-    ? new Date(date).toLocaleDateString("en-IN", {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric"
-      })
-    : "-";
-
-export const FeeReceiptPrint = ({
+const FeeReceiptPrintInner = ({
   receipt,
-  title = "School Fee Receipt",
+  title = "School Fee",
   showPrintButton = true
 }: FeeReceiptPrintProps): JSX.Element => {
+  const searchParams = useSearchParams();
+  const { showToast } = useToast();
+  const receiptRef = useRef<HTMLDivElement>(null);
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const didAutoDownload = useRef(false);
+
+  const handleDownloadPdf = async (): Promise<void> => {
+    if (!receiptRef.current) {
+      return;
+    }
+    setPdfLoading(true);
+    try {
+      await downloadReceiptPdf(
+        receiptRef.current,
+        `school-fee-receipt-${formatReceiptDisplayId(receipt.receiptNumber)}.pdf`
+      );
+      showToast("success", "Receipt PDF downloaded");
+    } catch {
+      showToast("error", "Could not generate PDF");
+    } finally {
+      setPdfLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (searchParams.get("download") !== "pdf" || didAutoDownload.current) {
+      return;
+    }
+    didAutoDownload.current = true;
+    void handleDownloadPdf();
+  }, [searchParams]);
+
+  const lineItems = receipt.feeHeadPayments.map((line) => ({
+    label: line.feeHeadName,
+    period: line.periodLabel,
+    amount: line.amountPaid
+  }));
+
+  const status =
+    receipt.totalAmountPaid >= receipt.totalAmountDue && receipt.totalAmountDue > 0
+      ? "paid"
+      : receipt.totalAmountPaid > 0
+        ? "partial"
+        : "pending";
+
   return (
-    <div className="flex min-h-screen flex-col items-center bg-gray-50 p-6 print:bg-white">
-      <div className="w-full max-w-[520px] rounded-2xl border border-gray-200 bg-white p-8 text-gray-900 shadow-md print:border-0 print:shadow-none">
-        <div className="mb-5 flex items-start justify-between gap-4">
-          <ReceiptOrgHeader subtitle={title} />
-          <div className="text-right">
-            <p className="text-xs font-medium uppercase tracking-wide text-gray-400">
-              Receipt
-            </p>
-            <p className="text-sm font-semibold text-gray-700">{receipt.receiptNumber}</p>
-          </div>
-        </div>
-        <div className="mb-5 h-0.5 w-full bg-primary" />
-
-        <div className="mb-4 grid grid-cols-2 gap-y-2 text-sm">
-          <p className="text-gray-500">Student</p>
-          <p className="text-right font-medium text-gray-900">{receipt.studentName}</p>
-          <p className="text-gray-500">Grade</p>
-          <p className="text-right font-medium text-gray-900">{receipt.grade}</p>
-          {receipt.parentName && (
-            <>
-              <p className="text-gray-500">Parent</p>
-              <p className="text-right font-medium text-gray-900">{receipt.parentName}</p>
-            </>
-          )}
-          <p className="text-gray-500">Payment Date</p>
-          <p className="text-right font-medium text-gray-900">{formatDate(receipt.paymentDate)}</p>
-          <p className="text-gray-500">Payment Mode</p>
-          <p className="text-right font-medium capitalize text-gray-900">
-            {receipt.paymentMode}
-          </p>
-          {receipt.upiTransactionId && (
-            <>
-              <p className="text-gray-500">Transaction ID</p>
-              <p className="text-right font-medium text-gray-900">{receipt.upiTransactionId}</p>
-            </>
-          )}
-        </div>
-
-        <table className="mb-4 w-full text-sm">
-          <thead>
-            <tr className="border-b border-gray-200 text-left text-gray-500">
-              <th className="py-2">Fee Head</th>
-              <th className="py-2">Period</th>
-              <th className="py-2 text-right">Paid</th>
-            </tr>
-          </thead>
-          <tbody>
-            {receipt.feeHeadPayments.map((line) => (
-              <tr key={`${line.feeHeadName}-${line.periodLabel}`} className="border-b border-gray-100">
-                <td className="py-2 text-gray-900">{line.feeHeadName}</td>
-                <td className="py-2 text-gray-700">{line.periodLabel}</td>
-                <td className="py-2 text-right font-medium text-gray-900">
-                  {formatINR(line.amountPaid)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        <div className="flex justify-between border-t border-gray-200 pt-3 text-sm font-semibold text-gray-900">
-          <span>Total Paid</span>
-          <span className="text-lg">{formatINR(receipt.totalAmountPaid)}</span>
-        </div>
-        {receipt.collectedBy && (
-          <p className="mt-2 text-sm text-gray-500">Collected by: {receipt.collectedBy}</p>
-        )}
-        {receipt.notes && <p className="mt-1 text-xs text-gray-500">Note: {receipt.notes}</p>}
-
-        <div className="-mx-8 -mb-8 mt-6 rounded-b-2xl bg-primary-50 px-8 py-4 print:rounded-none">
-          <p className="text-center text-xs text-gray-600">
-            Thank you for your payment. Please keep this receipt for your records.
-          </p>
-        </div>
-      </div>
-      {showPrintButton && (
-        <Button className="no-print mt-4" onClick={() => window.print()}>
-          Print
-        </Button>
-      )}
+    <div className="flex min-h-screen flex-col items-center bg-slate-100 p-6 print:bg-white">
+      <FeeReceiptCard
+        contentRef={receiptRef}
+        branding={receipt.organization ?? null}
+        receiptType={title}
+        period={schoolReceiptPeriodLabel(receipt.feeHeadPayments)}
+        receiptNumber={receipt.receiptNumber}
+        studentName={receipt.studentName}
+        studentMeta={receipt.grade}
+        status={status}
+        paymentDate={receipt.paymentDate}
+        collectedBy={receipt.collectedBy}
+        paymentMode={receipt.paymentMode}
+        amountDue={receipt.totalAmountDue}
+        amountPaid={receipt.totalAmountPaid}
+        lineItems={lineItems.length > 1 ? lineItems : undefined}
+        showActions={showPrintButton}
+        pdfLoading={pdfLoading}
+        onDownloadPdf={() => void handleDownloadPdf()}
+        footerNote={
+          receipt.notes ? (
+            <p className="mt-2 text-center text-[11px] text-slate-500">Note: {receipt.notes}</p>
+          ) : undefined
+        }
+      />
     </div>
   );
 };
+
+export const FeeReceiptPrint = (props: FeeReceiptPrintProps): JSX.Element => (
+  <Suspense fallback={<p className="p-6 text-center text-slate-500">Loading receipt...</p>}>
+    <FeeReceiptPrintInner {...props} />
+  </Suspense>
+);

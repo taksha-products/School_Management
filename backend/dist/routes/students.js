@@ -61,7 +61,7 @@ const formatTransport = (transport) => {
 };
 studentsRouter.get("/", ...scopeMiddleware, allowStudentRead, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     const authReq = req;
-    const { busId, search, status, withTransport, academicYear, grade } = req.query;
+    const { busId, search, status, withTransport, academicYear, grade, section } = req.query;
     const filter = {
         ...(0, orgFilter_1.orgFilter)(authReq, res),
         status: status || "active"
@@ -72,6 +72,10 @@ studentsRouter.get("/", ...scopeMiddleware, allowStudentRead, (0, asyncHandler_1
     const gradeFilter = typeof grade === "string" ? grade.trim() : "";
     if (gradeFilter) {
         filter.grade = gradeFilter;
+    }
+    const sectionFilter = typeof section === "string" ? section.trim() : "";
+    if (sectionFilter) {
+        filter.section = sectionFilter;
     }
     if (busId && mongoose_1.Types.ObjectId.isValid(busId)) {
         const transports = await StudentTransport_1.StudentTransport.find({
@@ -103,6 +107,7 @@ studentsRouter.get("/", ...scopeMiddleware, allowStudentRead, (0, asyncHandler_1
             ...student.toObject(),
             transport: formatTransport(transportByStudent.get(String(student._id)) ?? null)
         }));
+        const totalPages = Math.ceil(total / limit) || 1;
         res.json({
             success: true,
             data,
@@ -110,7 +115,9 @@ studentsRouter.get("/", ...scopeMiddleware, allowStudentRead, (0, asyncHandler_1
                 page,
                 limit,
                 total,
-                totalPages: Math.ceil(total / limit) || 1
+                totalPages,
+                hasNext: page < totalPages,
+                hasPrev: page > 1
             },
             message: "Students fetched successfully"
         });

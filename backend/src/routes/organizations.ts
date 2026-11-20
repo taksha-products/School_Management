@@ -6,6 +6,7 @@ import { requireOrgScope } from "../middleware/requireOrgScope";
 import { canAccessOrg } from "../middleware/roleCheck";
 import { Organization } from "../models/Organization";
 import { asyncHandler } from "../utils/asyncHandler";
+import { resolveAcademicYear } from "../utils/academicYear";
 import { getScopedOrganizationId } from "../utils/orgFilter";
 import { resolveOrgGradeConfig } from "../utils/orgGradeConfig";
 
@@ -21,7 +22,7 @@ organizationsRouter.get(
     const orgId = getScopedOrganizationId(authReq, res)!;
 
     const org = await Organization.findById(orgId).select(
-      "institutionType grades"
+      "institutionType grades currentAcademicYear"
     );
 
     if (!org) {
@@ -31,7 +32,10 @@ organizationsRouter.get(
 
     res.json({
       success: true,
-      data: resolveOrgGradeConfig(org),
+      data: {
+        ...resolveOrgGradeConfig(org),
+        currentAcademicYear: resolveAcademicYear(org.currentAcademicYear)
+      },
       message: "Organization config fetched successfully"
     });
   })

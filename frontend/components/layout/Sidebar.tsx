@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
 import { BrandLogo } from "@/components/shared/BrandLogo";
 import { useFeesOutstandingBadge } from "@/hooks/useFeesOutstandingBadge";
 import { useOrgFeatures } from "@/hooks/useOrgFeatures";
+import { useOrgTheme } from "@/hooks/useOrgTheme";
 import { getUser, logout } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
@@ -72,6 +73,68 @@ const userInitials = (name: string): string =>
     .join("")
     .slice(0, 2)
     .toUpperCase();
+
+const formatRoleLabel = (role: string): string => {
+  if (role === "orgAdmin") return "Org Admin";
+  return role.replace(/([A-Z])/g, " $1").trim();
+};
+
+const SIDEBAR_NOISE_DATA_URI = `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`;
+
+/**
+ * Same layered look as the super admin sidebar, but driven by the org's
+ * brand color (--brand-color) so white-labelled schools keep their color.
+ */
+const BrandSidebarBackdrop = (): JSX.Element => (
+  <>
+    <div
+      className="absolute inset-0"
+      style={{
+        backgroundImage:
+          "linear-gradient(180deg, color-mix(in srgb, var(--brand-color) 78%, white) 0%, var(--brand-color) 45%, color-mix(in srgb, var(--brand-color) 82%, black) 100%)"
+      }}
+      aria-hidden
+    />
+    {/* Wave artwork: its light/dark shapes only, tinted by the brand color */}
+    <div
+      className="absolute inset-0 bg-cover bg-[center_42%] bg-no-repeat opacity-70 mix-blend-luminosity"
+      style={{ backgroundImage: "url(/images/sidebarBG.png)" }}
+      aria-hidden
+    />
+    <div
+      className="pointer-events-none absolute inset-0"
+      style={{
+        backgroundImage:
+          "linear-gradient(180deg, rgb(255 255 255 / 0.12) 0%, transparent 50%, color-mix(in srgb, var(--brand-color) 40%, black) 100%)",
+        opacity: 0.55
+      }}
+      aria-hidden
+    />
+    <div
+      className="pointer-events-none absolute -right-20 top-0 h-72 w-72 rounded-full bg-white/20 blur-3xl"
+      aria-hidden
+    />
+    <div
+      className="pointer-events-none absolute inset-0 opacity-[0.28] mix-blend-overlay"
+      style={{ backgroundImage: SIDEBAR_NOISE_DATA_URI }}
+      aria-hidden
+    />
+  </>
+);
+
+/** Row look shared by every nav item (no padding — callers add it). */
+const navRowClass = (active: boolean): string =>
+  cn(
+    "flex items-center rounded-md text-[15px] font-medium transition-all duration-200",
+    active
+      ? "bg-white/[0.18] text-white shadow-[inset_0_1px_0_0_rgba(255,255,255,0.35)] ring-1 ring-inset ring-white/25 backdrop-blur-sm"
+      : "text-white/90 hover:bg-white/10 hover:text-white"
+  );
+
+const navPadClass = (collapsed: boolean): string =>
+  collapsed ? "justify-center py-3" : "gap-3 px-4 py-3";
+
+const NAV_ICON_CLASS = "h-[22px] w-[22px] shrink-0 stroke-[1.75]";
 
 const LegacySidebar = ({
   items,
@@ -190,6 +253,7 @@ export const Sidebar = ({
   const pathname = usePathname();
   const outstandingBadge = useFeesOutstandingBadge();
   const { enabledFeatures } = useOrgFeatures();
+  const { theme, displayLabel } = useOrgTheme();
   const user = getUser();
   const [collapsed, setCollapsed] = useState(false);
   const [openSection, setOpenSection] = useState<string | null>(null);
@@ -245,30 +309,20 @@ export const Sidebar = ({
                   toggleSection(item.href);
                 }}
                 title={collapsed ? item.label : undefined}
-                className={cn(
-                  "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-all duration-150",
-                  active
-                    ? "bg-primary-50 font-medium text-primary shadow-[inset_3px_0_0_0_var(--brand-color)]"
-                    : "text-gray-700 hover:bg-gray-50 hover:text-primary"
-                )}
+                className={cn(navRowClass(active), navPadClass(collapsed), "w-full")}
               >
-                <Icon
-                  className={cn(
-                    "h-[18px] w-[18px] shrink-0",
-                    active ? "text-primary" : "text-gray-500"
-                  )}
-                />
+                <Icon className={NAV_ICON_CLASS} aria-hidden />
                 {!collapsed && (
                   <>
                     <span className="flex-1 text-left">{item.label}</span>
                     {showBadge && (
-                      <span className="rounded-full bg-red-100 px-1.5 py-0.5 text-[11px] font-medium text-red-600">
+                      <span className="rounded-full bg-white px-1.5 py-0.5 text-[11px] font-semibold text-primary">
                         {outstandingBadge > 99 ? "99+" : outstandingBadge}
                       </span>
                     )}
                     <ChevronDown
                       className={cn(
-                        "h-4 w-4 shrink-0 text-gray-400 transition-transform duration-200",
+                        "h-4 w-4 shrink-0 text-white/70 transition-transform duration-200",
                         isOpen && "rotate-180"
                       )}
                     />
@@ -296,10 +350,10 @@ export const Sidebar = ({
                             href={child.href}
                             onClick={onMobileClose}
                             className={cn(
-                              "block rounded-lg py-1.5 pl-10 pr-3 text-[13px] transition-colors",
+                              "block rounded-md py-2 pl-[3.25rem] pr-3 text-sm transition-colors",
                               childActive
-                                ? "font-medium text-primary"
-                                : "text-gray-500 hover:text-primary"
+                                ? "bg-white/10 font-semibold text-white"
+                                : "text-white/80 hover:bg-white/10 hover:text-white"
                             )}
                           >
                             {child.label}
@@ -317,26 +371,15 @@ export const Sidebar = ({
           return (
             <div
               key={item.href}
-              className={cn(
-                "flex items-center rounded-lg pr-1 transition-all duration-150",
-                active ? "bg-primary-50 shadow-[inset_3px_0_0_0_var(--brand-color)]" : "hover:bg-gray-50"
-              )}
+              className={cn(navRowClass(active), "pr-1.5")}
             >
               <Link
                 href={item.href}
                 title={collapsed ? item.label : undefined}
                 onClick={onMobileClose}
-                className={cn(
-                  "flex flex-1 items-center gap-2.5 px-3 py-2 text-sm",
-                  active ? "font-medium text-primary" : "text-gray-700 hover:text-primary"
-                )}
+                className={cn("flex flex-1 items-center", navPadClass(collapsed))}
               >
-                <Icon
-                  className={cn(
-                    "h-[18px] w-[18px] shrink-0",
-                    active ? "text-primary" : "text-gray-500"
-                  )}
-                />
+                <Icon className={NAV_ICON_CLASS} aria-hidden />
                 {!collapsed && <span>{item.label}</span>}
               </Link>
               {!collapsed && (
@@ -344,7 +387,7 @@ export const Sidebar = ({
                   href={item.quickAction.href}
                   title={item.quickAction.title}
                   onClick={onMobileClose}
-                  className="rounded-md p-1.5 text-gray-400 transition hover:bg-primary-100 hover:text-primary"
+                  className="rounded-md p-1.5 text-white/70 transition hover:bg-white/15 hover:text-white"
                 >
                   <Upload className="h-4 w-4" />
                 </Link>
@@ -359,19 +402,9 @@ export const Sidebar = ({
             href={item.href}
             title={collapsed ? item.label : undefined}
             onClick={onMobileClose}
-            className={cn(
-              "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-all duration-150",
-              active
-                ? "bg-primary-50 font-medium text-primary shadow-[inset_3px_0_0_0_var(--brand-color)]"
-                : "text-gray-700 hover:bg-gray-50 hover:text-primary"
-            )}
+            className={cn(navRowClass(active), navPadClass(collapsed))}
           >
-            <Icon
-              className={cn(
-                "h-[18px] w-[18px] shrink-0",
-                active ? "text-primary" : "text-gray-500"
-              )}
-            />
+            <Icon className={NAV_ICON_CLASS} aria-hidden />
             {!collapsed && <span>{item.label}</span>}
           </Link>
         );
@@ -399,63 +432,96 @@ export const Sidebar = ({
       )}
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-50 flex h-full shrink-0 flex-col border-r border-gray-200 bg-white transition-[width,transform] duration-200 md:relative md:z-auto md:translate-x-0",
-          collapsed ? "w-14" : "w-60",
+          "fixed inset-y-0 left-0 z-50 flex h-full shrink-0 flex-col overflow-hidden transition-[width,transform] duration-200 md:relative md:z-auto md:translate-x-0",
+          collapsed ? "w-[4.5rem]" : "w-[17.5rem]",
           mobileOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
         )}
       >
-      <div className="flex h-16 shrink-0 items-center gap-2.5 border-b border-gray-200 px-5">
-        {whiteLabel ? (
-          <BrandLogo compact={collapsed} />
-        ) : (
-          <>
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary">
-              <Bus className="h-4 w-4 text-white" strokeWidth={2.5} />
-            </div>
-            {!collapsed && (
-              <div>
-                <p className="text-lg font-bold leading-tight text-gray-900">{brand}</p>
-                {roleBadge && (
-                  <span className="mt-0.5 inline-block rounded-full bg-primary-100 px-2 py-0.5 text-[10px] font-semibold text-primary">
-                    {roleBadge}
-                  </span>
+        <BrandSidebarBackdrop />
+        <div
+          className={cn(
+            "relative z-10 flex h-full min-h-0 flex-col pb-4 pt-9",
+            collapsed ? "px-3" : "px-7"
+          )}
+        >
+          {/* Brand */}
+          <div className="shrink-0">
+            {whiteLabel && theme.logoUrl ? (
+              <div
+                className={cn(
+                  "inline-flex items-center rounded-lg bg-white shadow-sm",
+                  collapsed ? "p-1" : "px-3 py-2"
                 )}
+              >
+                <img
+                  src={theme.logoUrl}
+                  alt={displayLabel}
+                  className={
+                    collapsed
+                      ? "max-h-8 w-auto max-w-[2rem] object-contain"
+                      : "max-h-10 w-auto max-w-[12rem] object-contain object-left"
+                  }
+                />
+              </div>
+            ) : collapsed ? (
+              <div className="flex h-10 w-full items-center justify-center rounded-md bg-white/15 ring-1 ring-inset ring-white/25">
+                <Bus className="h-5 w-5 text-white" strokeWidth={2} aria-hidden />
+              </div>
+            ) : (
+              <>
+                <p className="truncate text-[25px] font-semibold leading-tight text-white">
+                  {whiteLabel ? displayLabel : brand}
+                </p>
+                <p className="mt-1 text-[9px] font-medium uppercase tracking-[3px] text-white/90">
+                  {roleBadge ?? "School Management"}
+                </p>
+              </>
+            )}
+          </div>
+
+          <nav className="mt-10 min-h-0 flex-1 space-y-1 overflow-y-auto">{navContent}</nav>
+
+          {/* User + log out */}
+          <div className="mt-6 shrink-0 border-t border-white/25 pt-6">
+            {!collapsed && user && (
+              <div className="flex items-center gap-3 px-1">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white text-sm font-semibold text-primary">
+                  {userInitials(user.name)}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[15px] font-semibold text-white">{user.name}</p>
+                  <p className="truncate text-sm text-white/85">{formatRoleLabel(user.role)}</p>
+                </div>
               </div>
             )}
-          </>
-        )}
-      </div>
-
-      <nav className="flex-1 space-y-0.5 overflow-y-auto p-3">{navContent}</nav>
-
-      {!collapsed && user && (
-        <div className="shrink-0 border-t border-gray-200 p-3">
-          <div className="flex items-center gap-3 rounded-lg px-2 py-2">
-            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-primary-100 text-sm font-medium text-primary">
-              {userInitials(user.name)}
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium text-gray-900">{user.name}</p>
-              <p className="truncate text-xs capitalize text-gray-500">{user.role.replace(/([A-Z])/g, " $1").trim()}</p>
-            </div>
+            <button
+              type="button"
+              onClick={() => void logout()}
+              title={collapsed ? "Log out" : undefined}
+              className={cn(
+                "flex w-full items-center rounded-md py-2.5 text-[15px] font-medium text-white/95 transition hover:bg-white/10",
+                collapsed ? "justify-center" : "mt-5 gap-3 px-4"
+              )}
+            >
+              <LogOut className={NAV_ICON_CLASS} aria-hidden />
+              {!collapsed && "Log out"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setCollapsed((prev) => {
+                  const next = !prev;
+                  localStorage.setItem(STORAGE_KEY, String(next));
+                  return next;
+                });
+              }}
+              className="mt-2 hidden w-full rounded-md py-2 text-center text-xs font-medium text-white/70 transition hover:bg-white/10 hover:text-white md:block"
+            >
+              {collapsed ? "→" : "← Collapse"}
+            </button>
           </div>
         </div>
-      )}
-
-      <button
-        type="button"
-        onClick={() => {
-          setCollapsed((prev) => {
-            const next = !prev;
-            localStorage.setItem(STORAGE_KEY, String(next));
-            return next;
-          });
-        }}
-        className="shrink-0 border-t border-gray-200 py-2.5 text-center text-xs text-gray-400 hover:bg-gray-50 hover:text-gray-600"
-      >
-        {collapsed ? "→" : "← Collapse"}
-      </button>
-    </aside>
+      </aside>
     </>
   );
 };

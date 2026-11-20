@@ -8,6 +8,7 @@ const Student_1 = require("../models/Student");
 const StudentTransport_1 = require("../models/StudentTransport");
 const StudentFeeAssignment_1 = require("../models/StudentFeeAssignment");
 const schoolFeeLedger_1 = require("../utils/schoolFeeLedger");
+const orgThemeService_1 = require("./orgThemeService");
 const buildStudentFeeStatusMap = async (organizationId, academicYear) => {
     const organizationObjectId = new mongoose_1.Types.ObjectId(organizationId);
     await (0, schoolFeeLedger_1.refreshOverdueStatuses)({
@@ -255,7 +256,8 @@ const buildReceiptView = async (organizationId, receiptNumber) => {
         return null;
     }
     const student = payment.studentId;
-    const collector = payment.collectedBy;
+    const organization = await (0, orgThemeService_1.getOrgReceiptBranding)(organizationId);
+    const collectedByLabel = organization?.displayName?.trim() || organization?.orgName || "School";
     return {
         receiptNumber: payment.receiptNumber,
         paymentDate: payment.paymentDate,
@@ -268,8 +270,9 @@ const buildReceiptView = async (organizationId, receiptNumber) => {
         totalAmountDue: payment.totalAmountDue,
         totalAmountPaid: payment.totalAmountPaid,
         totalLateFee: payment.totalLateFee,
-        collectedBy: collector?.name,
-        notes: payment.notes
+        collectedBy: collectedByLabel,
+        notes: payment.notes,
+        organization
     };
 };
 exports.buildReceiptView = buildReceiptView;

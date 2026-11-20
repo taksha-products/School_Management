@@ -7,7 +7,8 @@ import { PageWrapper } from "@/components/layout/PageWrapper";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { useToast } from "@/components/ui/Toast";
-import { ACADEMIC_YEAR } from "@/lib/constants";
+import { ORG_CONFIG_QUERY_KEY } from "@/hooks/useOrgConfig";
+import { getCurrentAcademicYear } from "@/lib/academicYear";
 import { api } from "@/lib/api";
 
 interface OrganizationSettings {
@@ -25,7 +26,7 @@ interface OrganizationSettings {
 const OrganizationSettingsPage = (): JSX.Element => {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
-  const [academicYear, setAcademicYear] = useState(ACADEMIC_YEAR);
+  const [academicYear, setAcademicYear] = useState(() => getCurrentAcademicYear());
 
   const orgQuery = useQuery({
     queryKey: ["org-settings"],
@@ -44,6 +45,8 @@ const OrganizationSettingsPage = (): JSX.Element => {
       api.patch("/api/org/organization", { currentAcademicYear: academicYear }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["org-settings"] });
+      // Every page reads the academic year from the org config.
+      queryClient.invalidateQueries({ queryKey: ORG_CONFIG_QUERY_KEY });
       showToast("success", "Organization settings saved");
     },
     onError: () => showToast("error", "Failed to save settings")
@@ -98,7 +101,7 @@ const OrganizationSettingsPage = (): JSX.Element => {
           <input
             value={academicYear}
             onChange={(e) => setAcademicYear(e.target.value)}
-            placeholder="2025-26"
+            placeholder={getCurrentAcademicYear()}
             className="mb-3 w-full rounded border border-slate-200 px-3 py-2"
           />
           <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>

@@ -3,8 +3,8 @@
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 
+import { useAcademicYear } from "@/hooks/useAcademicYear";
 import { Card } from "@/components/ui/Card";
-import { ACADEMIC_YEAR } from "@/lib/constants";
 import { api } from "@/lib/api";
 import { formatINR } from "@/lib/utils";
 import type { Student } from "@/types";
@@ -46,13 +46,14 @@ const ParentDashboardPage = (): JSX.Element => {
 };
 
 const ChildBalanceCard = ({ child }: { child: Student }): JSX.Element => {
+  const orgAcademicYear = useAcademicYear();
   const feesQuery = useQuery({
     queryKey: ["parent-child-fees", child._id],
     queryFn: async () =>
       (
         await api.get<{ data: { summary: { outstandingBalance: number } } }>(
           `/api/parent/children/${child._id}/fees`,
-          { params: { academicYear: ACADEMIC_YEAR } }
+          { params: { academicYear: orgAcademicYear } }
         )
       ).data.data
   });

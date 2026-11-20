@@ -16,6 +16,7 @@
     "@hookform/resolvers": "^3.9.0",
     "@tanstack/react-query": "^5.59.0",
     "axios": "^1.7.7",
+    "html2pdf.js": "^0.14.0",
     "jwt-decode": "^4.0.0",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.460.0",

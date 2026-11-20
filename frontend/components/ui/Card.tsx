@@ -18,7 +18,7 @@ export const Card = ({
 }: CardProps): JSX.Element => (
   <div
     className={cn(
-      "rounded-xl border border-gray-200 bg-white text-gray-900 shadow-card",
+      "rounded-md border border-gray-200 bg-white text-gray-900 shadow-card",
       flush ? "p-0" : compact ? "p-4" : "p-6",
       className
     )}

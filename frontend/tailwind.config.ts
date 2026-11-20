@@ -43,8 +43,12 @@ const config: Config = {
         sm: "0 1px 2px 0 rgb(0 0 0 / 0.05)"
       },
       borderRadius: {
-        lg: "12px",
-        xl: "16px"
+        sm: "var(--radius-sm)",
+        DEFAULT: "var(--radius-md)",
+        md: "var(--radius-md)",
+        lg: "var(--radius-lg)",
+        xl: "var(--radius-lg)",
+        "2xl": "var(--radius-lg)"
       }
     }
   },

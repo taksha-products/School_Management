@@ -9,7 +9,7 @@ import {
   type ReactNode
 } from "react";
 
-type ToastType = "success" | "error";
+type ToastType = "success" | "error" | "info";
 
 interface ToastItem {
   id: number;
@@ -46,7 +46,9 @@ export const ToastProvider = ({ children }: { children: ReactNode }): JSX.Elemen
             className={`rounded-lg px-4 py-3 text-sm shadow-lg ${
               toast.type === "success"
                 ? "bg-emerald-500 text-white"
-                : "bg-rose-500 text-white"
+                : toast.type === "info"
+                  ? "bg-[#171717] text-white"
+                  : "bg-rose-500 text-white"
             }`}
           >
             {toast.message}

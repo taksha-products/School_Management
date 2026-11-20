@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { JSX, ReactNode } from "react";
 
-import { Header } from "@/components/layout/Header";
+import { OrgAdminLayoutProvider } from "@/components/layout/OrgAdminLayoutContext";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { adminNav } from "@/components/layout/adminNav";
 import { OrgThemeProvider } from "@/components/OrgThemeProvider";
@@ -31,7 +31,7 @@ const AdminLayout = ({ children }: AdminLayoutProps): JSX.Element => {
 
   if (!ready) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50">
+      <div className="flex min-h-screen items-center justify-center bg-white">
         <p className="text-sm text-gray-500">Loading...</p>
       </div>
     );
@@ -39,21 +39,19 @@ const AdminLayout = ({ children }: AdminLayoutProps): JSX.Element => {
 
   return (
     <OrgThemeProvider>
-      <div className="flex h-screen overflow-hidden bg-gray-50">
-        <Sidebar
-          items={adminNav}
-          whiteLabel
-          mobileOpen={mobileNavOpen}
-          onMobileClose={() => setMobileNavOpen(false)}
-        />
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-          <Header
-            portalLabel="Organization Admin"
-            onMenuClick={() => setMobileNavOpen(true)}
+      <OrgAdminLayoutProvider openMobileNav={() => setMobileNavOpen(true)}>
+        <div className="flex h-screen overflow-hidden bg-white">
+          <Sidebar
+            items={adminNav}
+            whiteLabel
+            mobileOpen={mobileNavOpen}
+            onMobileClose={() => setMobileNavOpen(false)}
           />
-          <main className="min-h-0 flex-1 overflow-y-auto bg-gray-50">{children}</main>
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+            <main className="min-h-0 flex-1 overflow-y-auto bg-white">{children}</main>
+          </div>
         </div>
-      </div>
+      </OrgAdminLayoutProvider>
     </OrgThemeProvider>
   );
 };

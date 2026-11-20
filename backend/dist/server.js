@@ -47,6 +47,7 @@ const hpp_1 = __importDefault(require("hpp"));
 const http_1 = require("http");
 require("dotenv/config");
 const db_1 = require("./config/db");
+const syncIndexes_1 = require("./config/syncIndexes");
 const redis_1 = require("./config/redis");
 const socket_1 = require("./config/socket");
 const auth_1 = __importDefault(require("./routes/auth"));
@@ -148,7 +149,17 @@ app.use((err, req, res, _next) => {
         orgId: authReq.user?.organizationId
     });
     if (err.code === 11000 && err.keyValue) {
-        const field = Object.keys(err.keyValue)[0];
+        const keyValue = err.keyValue;
+        const fields = Object.keys(keyValue);
+        if (fields.includes("busNumber")) {
+            res.status(400).json({
+                success: false,
+                data: null,
+                message: "A bus with this number already exists in your organization."
+            });
+            return;
+        }
+        const field = fields[0] ?? "field";
         res.status(400).json({
             success: false,
             data: null,
@@ -178,6 +189,7 @@ app.use((err, req, res, _next) => {
 });
 const startServer = async () => {
     await (0, db_1.connectDB)();
+    await (0, syncIndexes_1.syncCriticalIndexes)();
     await (0, redis_1.initRedis)();
     const httpServer = (0, http_1.createServer)(app);
     (0, socket_1.initSocketServer)(httpServer);

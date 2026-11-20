@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
 
+import { useAcademicYear } from "@/hooks/useAcademicYear";
 import { BulkProgressStepper } from "@/components/shared/BulkProgressStepper";
 import { PageWrapper } from "@/components/layout/PageWrapper";
 import { Button } from "@/components/ui/Button";
@@ -21,6 +22,7 @@ import type {
 const STEPS = ["Download & Upload", "Preview & Validate", "Import Results"];
 
 const UploadStudentsPage = (): JSX.Element => {
+  const orgAcademicYear = useAcademicYear();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { showToast } = useToast();
   const { config: orgConfig, gradeOptions, hasAnySections } = useOrgConfig();
@@ -51,7 +53,7 @@ const UploadStudentsPage = (): JSX.Element => {
       { column: "Parent Name", required: "Yes", format: "Text", example: "Suresh Sharma" },
       { column: "Parent Phone", required: "Yes", format: "10 digits", example: "9876543210" },
       { column: "Address", required: "No", format: "Text", example: "123 MG Road, Bengaluru" },
-      { column: "Academic Year", required: "Yes", format: "YYYY-YY", example: "2025-26" }
+      { column: "Academic Year", required: "Yes", format: "YYYY-YY", example: orgAcademicYear }
     ];
     return columns;
   }, [gradeOptions, orgConfig, hasAnySections]);

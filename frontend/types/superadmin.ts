@@ -3,7 +3,7 @@ import type { Organization } from "@/types/schoolFees";
 export interface SuperDashboardStats {
   totalOrganizations: number;
   totalStudents: number;
-  activePlans: number;
+  activeOrganizations: number;
   monthlyRevenue: number;
 }
 

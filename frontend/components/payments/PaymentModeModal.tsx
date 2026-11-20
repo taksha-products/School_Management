@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ReceiptDownload } from "@/components/payments/ReceiptDownload";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
+import { useFeatureEnabled } from "@/hooks/useOrgFeatures";
 import { useOrgTheme } from "@/hooks/useOrgTheme";
 import { useRazorpay, type RazorpayResponse } from "@/hooks/useRazorpay";
 import {
@@ -48,8 +49,9 @@ export const PaymentModeModal = ({
   const { showToast } = useToast();
   const { isLoaded, openCheckout } = useRazorpay();
   const { displayLabel, brandColor } = useOrgTheme();
+  const onlinePaymentsEnabled = useFeatureEnabled("onlinePayments");
 
-  const [tab, setTab] = useState<TabId>("online");
+  const [tab, setTab] = useState<TabId>("cash");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -66,7 +68,7 @@ export const PaymentModeModal = ({
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const resetState = useCallback(() => {
-    setTab("online");
+    setTab("cash");
     setLoading(false);
     setError(null);
     setQrCodeUrl(null);
@@ -93,6 +95,21 @@ export const PaymentModeModal = ({
       setCashAmount(amount);
     }
   }, [isOpen, amount, resetState]);
+
+  const tabs = useMemo(() => {
+    const options: Array<{ id: TabId; label: string }> = [{ id: "cash", label: "Cash" }];
+    if (onlinePaymentsEnabled) {
+      options.push({ id: "online", label: "Online" });
+      options.push({ id: "upi", label: "UPI QR (Office)" });
+    }
+    return options;
+  }, [onlinePaymentsEnabled]);
+
+  useEffect(() => {
+    if (!onlinePaymentsEnabled && (tab === "online" || tab === "upi")) {
+      setTab("cash");
+    }
+  }, [onlinePaymentsEnabled, tab]);
 
   useEffect(() => {
     return () => {
@@ -230,12 +247,6 @@ export const PaymentModeModal = ({
     }
   };
 
-  const tabs: Array<{ id: TabId; label: string }> = [
-    { id: "online", label: "Online" },
-    { id: "upi", label: "UPI QR (Office)" },
-    { id: "cash", label: "Cash" }
-  ];
-
   return (
     <Modal
       isOpen={isOpen}
@@ -272,25 +283,27 @@ export const PaymentModeModal = ({
           </div>
         ) : (
           <>
-            <div className="flex flex-wrap gap-2 border-b border-slate-100 pb-2">
-              {tabs.map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  className={`rounded-lg px-3 py-1.5 text-sm font-medium ${
-                    tab === t.id
-                      ? "bg-primary text-white"
-                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                  }`}
-                  onClick={() => {
-                    setTab(t.id);
-                    setError(null);
-                  }}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
+            {tabs.length > 1 && (
+              <div className="flex flex-wrap gap-2 border-b border-slate-100 pb-2">
+                {tabs.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    className={`rounded-lg px-3 py-1.5 text-sm font-medium ${
+                      tab === t.id
+                        ? "bg-primary text-white"
+                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                    }`}
+                    onClick={() => {
+                      setTab(t.id);
+                      setError(null);
+                    }}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            )}
 
             {tab === "online" && (
               <div className="space-y-3">

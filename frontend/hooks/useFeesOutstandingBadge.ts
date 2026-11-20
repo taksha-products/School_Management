@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { ACADEMIC_YEAR } from "@/lib/constants";
+import { useAcademicYear } from "@/hooks/useAcademicYear";
 import { getUser } from "@/lib/auth";
 import { api } from "@/lib/api";
 import type { PaginatedResponse } from "@/types/pagination";
@@ -10,15 +10,16 @@ import type { FeePayment } from "@/types";
 const currentMonth = (): string => new Date().toISOString().slice(0, 7);
 
 export const useFeesOutstandingBadge = (): number => {
+  const orgAcademicYear = useAcademicYear();
   const isOrgAdmin = getUser()?.role === "orgAdmin";
   const month = currentMonth();
 
   const schoolQuery = useQuery({
-    queryKey: ["nav-badge-school-outstanding", ACADEMIC_YEAR],
+    queryKey: ["nav-badge-school-outstanding", orgAcademicYear],
     queryFn: async () =>
       (
         await api.get<PaginatedResponse<OutstandingStudent>>("/api/school-fees/outstanding", {
-          params: { academicYear: ACADEMIC_YEAR, page: 1, limit: 1 }
+          params: { academicYear: orgAcademicYear, page: 1, limit: 1 }
         })
       ).data.pagination?.total ?? 0,
     refetchInterval: 5 * 60 * 1000,
@@ -27,13 +28,13 @@ export const useFeesOutstandingBadge = (): number => {
   });
 
   const transportQuery = useQuery({
-    queryKey: ["nav-badge-transport-pending", month, ACADEMIC_YEAR],
+    queryKey: ["nav-badge-transport-pending", month, orgAcademicYear],
     queryFn: async () =>
       (
         await api.get<PaginatedResponse<FeePayment>>("/api/fees", {
           params: {
             month,
-            academicYear: ACADEMIC_YEAR,
+            academicYear: orgAcademicYear,
             status: "pending",
             page: 1,
             limit: 1
@@ -50,27 +51,28 @@ export const useFeesOutstandingBadge = (): number => {
 };
 
 export const useFeesTabBadges = (): { school: number; transport: number } => {
+  const orgAcademicYear = useAcademicYear();
   const month = currentMonth();
 
   const schoolQuery = useQuery({
-    queryKey: ["fees-tab-badge-school", ACADEMIC_YEAR],
+    queryKey: ["fees-tab-badge-school", orgAcademicYear],
     queryFn: async () =>
       (
         await api.get<PaginatedResponse<OutstandingStudent>>("/api/school-fees/outstanding", {
-          params: { academicYear: ACADEMIC_YEAR, page: 1, limit: 1 }
+          params: { academicYear: orgAcademicYear, page: 1, limit: 1 }
         })
       ).data.pagination?.total ?? 0,
     staleTime: 60_000
   });
 
   const transportQuery = useQuery({
-    queryKey: ["fees-tab-badge-transport", month, ACADEMIC_YEAR],
+    queryKey: ["fees-tab-badge-transport", month, orgAcademicYear],
     queryFn: async () =>
       (
         await api.get<PaginatedResponse<FeePayment>>("/api/fees", {
           params: {
             month,
-            academicYear: ACADEMIC_YEAR,
+            academicYear: orgAcademicYear,
             status: "pending",
             page: 1,
             limit: 1

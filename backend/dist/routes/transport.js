@@ -10,6 +10,7 @@ const Bus_1 = require("../models/Bus");
 const Student_1 = require("../models/Student");
 const StudentTransport_1 = require("../models/StudentTransport");
 const asyncHandler_1 = require("../utils/asyncHandler");
+const busCapacity_1 = require("../utils/busCapacity");
 const cache_1 = require("../utils/cache");
 const orgFilter_1 = require("../utils/orgFilter");
 const transportRouter = (0, express_1.Router)();
@@ -128,12 +129,15 @@ transportRouter.post("/", ...scopeMiddleware, manageTransport, (0, asyncHandler_
     }
     const fee = Number(monthlyTransportFee ?? 1500);
     const effectiveFromDate = effectiveFrom ? new Date(effectiveFrom) : new Date();
-    const activeCount = await StudentTransport_1.StudentTransport.countDocuments({
-        organizationId: orgId,
-        busId: bus._id,
-        status: "active"
-    });
-    const atCapacity = activeCount >= bus.capacity;
+    const activeCount = await (0, busCapacity_1.countActiveStudentsOnBus)(orgId, bus._id);
+    if ((0, busCapacity_1.wouldExceedBusCapacity)(bus.capacity, activeCount, 1)) {
+        res.status(400).json({
+            success: false,
+            data: null,
+            message: (0, busCapacity_1.busCapacityExceededMessage)(bus.busNumber, bus.capacity, activeCount, 1)
+        });
+        return;
+    }
     const record = await StudentTransport_1.StudentTransport.create({
         organizationId: orgId,
         studentId: student._id,
@@ -151,12 +155,7 @@ transportRouter.post("/", ...scopeMiddleware, manageTransport, (0, asyncHandler_
     res.status(201).json({
         success: true,
         data: record,
-        message: "Student registered for bus transport",
-        ...(atCapacity
-            ? {
-                warning: `Bus ${bus.busNumber} is at capacity (${activeCount}/${bus.capacity})`
-            }
-            : {})
+        message: "Student registered for bus transport"
     });
 }));
 transportRouter.put("/:id", ...scopeMiddleware, manageTransport, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
@@ -175,6 +174,15 @@ transportRouter.put("/:id", ...scopeMiddleware, manageTransport, (0, asyncHandle
         const newBus = await Bus_1.Bus.findOne({ _id: busId, organizationId: orgId, status: "active" });
         if (!newBus) {
             res.status(404).json({ success: false, data: null, message: "Bus not found or inactive" });
+            return;
+        }
+        const activeOnNewBus = await (0, busCapacity_1.countActiveStudentsOnBus)(orgId, newBus._id);
+        if ((0, busCapacity_1.wouldExceedBusCapacity)(newBus.capacity, activeOnNewBus, 1)) {
+            res.status(400).json({
+                success: false,
+                data: null,
+                message: (0, busCapacity_1.busCapacityExceededMessage)(newBus.busNumber, newBus.capacity, activeOnNewBus, 1)
+            });
             return;
         }
         record.status = "inactive";

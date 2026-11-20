@@ -3,15 +3,22 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Copy } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, type JSX } from "react";
 
-import { ListPagination } from "@/components/shared/ListPagination";
-import { PageWrapper } from "@/components/layout/PageWrapper";
+import { SuperPageWrapper } from "@/components/layout/SuperPageWrapper";
 import { DeleteOrganizationModal } from "@/components/superadmin/DeleteOrganizationModal";
+import { SuperAdminListPagination } from "@/components/superadmin/SuperAdminListPagination";
+import { SuperAdminSectionCard } from "@/components/superadmin/SuperAdminSectionCard";
+import {
+  SuperAdminStatusBadge,
+  superAdminOutlineButtonClass,
+  superAdminTableHeadClass
+} from "@/components/superadmin/SuperAdminStatusBadge";
 import { Button } from "@/components/ui/Button";
-import { Card } from "@/components/ui/Card";
 import { Modal } from "@/components/ui/Modal";
+import { TableSkeleton } from "@/components/ui/TableSkeleton";
 import { useToast } from "@/components/ui/Toast";
+import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import type { PaginatedResponse } from "@/types/pagination";
 import type { Organization } from "@/types/schoolFees";
@@ -77,54 +84,102 @@ const OrganizationsPage = (): JSX.Element => {
   };
 
   return (
-    <PageWrapper title="Organizations">
-      <Card>
-        <div className="mb-4 flex justify-end">
-          <Button onClick={() => setOpen(true)}>Add Organization</Button>
+    <SuperPageWrapper title="Organizations" subtitle="Manage schools on the platform">
+      <SuperAdminSectionCard>
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="text-lg font-semibold tracking-tight text-gray-900">All organizations</h2>
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            className="inline-flex h-10 shrink-0 items-center justify-center rounded-md bg-primary px-5 text-sm font-medium text-white shadow-sm transition hover:bg-primary-hover"
+          >
+            Add organization
+          </button>
         </div>
-        <table className="w-full text-sm">
-          <thead className="text-left text-slate-500">
-            <tr>
-              <th className="p-2">School</th>
-              <th>Code</th>
-              <th>Plan</th>
-              <th>Students</th>
-              <th>Status</th>
-              <th className="p-2 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {orgRows.map((org) => (
-              <tr
-                key={org._id}
-                className="cursor-pointer border-t border-slate-100 transition-colors hover:bg-slate-50"
-                onClick={() => router.push(`/super/organizations/${org._id}`)}
-              >
-                <td className="p-2 font-medium">{org.name}</td>
-                <td>{org.code}</td>
-                <td className="capitalize">{org.plan}</td>
-                <td>{org.studentCount ?? 0}</td>
-                <td>{org.isActive ? "Active" : "Inactive"}</td>
-                <td className="p-2 text-right">
-                  <Button
-                    variant="danger"
-                    size="sm"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setDeleteOrg(org);
-                    }}
-                  >
-                    Delete
-                  </Button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {pagination && (
-          <ListPagination pagination={pagination} noun="organizations" onPageChange={setPage} />
+
+        {orgsQuery.isLoading ? (
+          <TableSkeleton />
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <div className="min-w-[720px] overflow-hidden rounded-md border border-gray-200">
+                <table className="w-full table-fixed text-left text-sm">
+                  <colgroup>
+                    <col className="w-[28%]" />
+                    <col className="w-[12%]" />
+                    <col className="w-[12%]" />
+                    <col className="w-[12%]" />
+                    <col className="w-[16%]" />
+                    <col className="w-[20%]" />
+                  </colgroup>
+                  <thead>
+                    <tr className="bg-[#F9FAFB]">
+                      <th className={superAdminTableHeadClass}>School</th>
+                      <th className={superAdminTableHeadClass}>Code</th>
+                      <th className={superAdminTableHeadClass}>Plan</th>
+                      <th className={superAdminTableHeadClass}>Students</th>
+                      <th className={superAdminTableHeadClass}>Status</th>
+                      <th className={cn(superAdminTableHeadClass, "text-right")}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 bg-white">
+                    {orgRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="px-4 py-10 text-center text-sm text-gray-500">
+                          No organizations found.
+                        </td>
+                      </tr>
+                    ) : (
+                      orgRows.map((org, index) => (
+                        <tr
+                          key={org._id}
+                          className={cn(
+                            "cursor-pointer transition-colors hover:bg-gray-50/80",
+                            index % 2 === 1 && "bg-[#FAFAFA]"
+                          )}
+                          onClick={() => router.push(`/super/organizations/${org._id}`)}
+                        >
+                          <td className="truncate px-4 py-3 font-semibold text-gray-900">{org.name}</td>
+                          <td className="px-4 py-3 font-mono text-xs text-gray-600">{org.code}</td>
+                          <td className="px-4 py-3 capitalize text-gray-600">{org.plan}</td>
+                          <td className="px-4 py-3 tabular-nums text-gray-600">
+                            {org.studentCount ?? 0}
+                          </td>
+                          <td className="px-4 py-3">
+                            <SuperAdminStatusBadge active={org.isActive} />
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <button
+                              type="button"
+                              className={cn(
+                                superAdminOutlineButtonClass,
+                                "border-red-200 text-red-600 hover:bg-red-50"
+                              )}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setDeleteOrg(org);
+                              }}
+                            >
+                              Delete
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            {pagination && (
+              <SuperAdminListPagination
+                pagination={pagination}
+                noun="organizations"
+                onPageChange={setPage}
+              />
+            )}
+          </>
         )}
-      </Card>
+      </SuperAdminSectionCard>
 
       <Modal isOpen={open} title="Add Organization" onClose={() => setOpen(false)}>
         <div className="space-y-3">
@@ -134,7 +189,7 @@ const OrganizationsPage = (): JSX.Element => {
               placeholder={field.charAt(0).toUpperCase() + field.slice(1)}
               value={form[field]}
               onChange={(e) => setForm((f) => ({ ...f, [field]: e.target.value }))}
-              className="w-full rounded border px-3 py-2"
+              className="h-10 w-full rounded-md border border-gray-200 px-3 text-sm text-gray-900 outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
             />
           ))}
           <select
@@ -142,7 +197,7 @@ const OrganizationsPage = (): JSX.Element => {
             onChange={(e) =>
               setForm((f) => ({ ...f, plan: e.target.value as typeof form.plan }))
             }
-            className="w-full rounded border px-3 py-2"
+            className="h-10 w-full rounded-md border border-gray-200 px-3 text-sm text-gray-900 outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
           >
             <option value="trial">Trial</option>
             <option value="basic">Basic</option>
@@ -168,15 +223,17 @@ const OrganizationsPage = (): JSX.Element => {
 
       <Modal isOpen={!!creds} title="Org Admin Credentials" onClose={() => setCreds(null)}>
         {creds && (
-          <div className="space-y-3 text-sm">
+          <div className="space-y-3 text-sm text-gray-700">
             <p>
-              <span className="text-slate-500">Email:</span> {creds.email}
+              <span className="font-medium text-gray-500">Email:</span> {creds.email}
             </p>
-            <p className="flex items-center gap-2">
-              <span className="text-slate-500">Temporary password:</span>
-              <code className="rounded bg-gray-100 px-2 py-1 text-gray-800">{creds.temporaryPassword}</code>
+            <p className="flex flex-wrap items-center gap-2">
+              <span className="font-medium text-gray-500">Temporary password:</span>
+              <code className="rounded-md bg-gray-100 px-2 py-1 text-gray-800">
+                {creds.temporaryPassword}
+              </code>
               <button type="button" onClick={copyPassword} aria-label="Copy password">
-                <Copy className="h-4 w-4" />
+                <Copy className="h-4 w-4 text-gray-600" />
               </button>
             </p>
             <p className="text-xs text-amber-700">
@@ -185,7 +242,7 @@ const OrganizationsPage = (): JSX.Element => {
           </div>
         )}
       </Modal>
-    </PageWrapper>
+    </SuperPageWrapper>
   );
 };
 

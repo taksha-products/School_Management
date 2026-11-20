@@ -12,6 +12,7 @@ import {
   YAxis
 } from "recharts";
 
+import { useAcademicYearState } from "@/hooks/useAcademicYear";
 import { PageWrapper } from "@/components/layout/PageWrapper";
 import { Card } from "@/components/ui/Card";
 import { TableSkeleton } from "@/components/ui/TableSkeleton";
@@ -20,7 +21,7 @@ import type { MonthlyReport } from "@/types";
 
 const PrincipalReportsPage = (): JSX.Element => {
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
-  const [academicYear, setAcademicYear] = useState("2025-26");
+  const [academicYear, setAcademicYear] = useAcademicYearState();
 
   const monthlyQuery = useQuery({
     queryKey: ["principal-reports", month, academicYear],

@@ -10,6 +10,7 @@ import {
   periodMatchesMonth,
   refreshOverdueStatuses
 } from "../utils/schoolFeeLedger";
+import { getOrgReceiptBranding } from "./orgThemeService";
 
 export interface StudentFeeStatusEntry {
   balance: number;
@@ -342,7 +343,9 @@ export const buildReceiptView = async (
     grade: string;
     parentName: string;
   };
-  const collector = payment.collectedBy as unknown as { name: string };
+  const organization = await getOrgReceiptBranding(organizationId);
+  const collectedByLabel =
+    organization?.displayName?.trim() || organization?.orgName || "School";
 
   return {
     receiptNumber: payment.receiptNumber,
@@ -356,8 +359,9 @@ export const buildReceiptView = async (
     totalAmountDue: payment.totalAmountDue,
     totalAmountPaid: payment.totalAmountPaid,
     totalLateFee: payment.totalLateFee,
-    collectedBy: collector?.name,
-    notes: payment.notes
+    collectedBy: collectedByLabel,
+    notes: payment.notes,
+    organization
   };
 };
 

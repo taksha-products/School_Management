@@ -10,6 +10,9 @@ import { asyncHandler } from "../../utils/asyncHandler";
 
 const dashboardRouter = Router();
 
+/** Soft-deleted organizations are excluded from all dashboard metrics. */
+const notDeletedFilter = { deletedAt: { $exists: false } };
+
 interface MonthRange {
   start: Date;
   end: Date;
@@ -33,22 +36,27 @@ dashboardRouter.get(
   asyncHandler(async (_req, res) => {
     const { start, end } = getCurrentMonthRange();
 
+    const activeOrganizationIds = await Organization.find(notDeletedFilter).distinct("_id");
+
     const [
       totalOrganizations,
       totalStudents,
-      activePlans,
+      activeOrganizations,
       transportRevenueAgg,
       schoolRevenueAgg,
       organizations
     ] = await Promise.all([
-      Organization.countDocuments(),
-      Student.countDocuments(),
-      Organization.countDocuments({ isActive: true }),
+      Organization.countDocuments(notDeletedFilter),
+      activeOrganizationIds.length === 0
+        ? Promise.resolve(0)
+        : Student.countDocuments({ organizationId: { $in: activeOrganizationIds } }),
+      Organization.countDocuments({ ...notDeletedFilter, isActive: true }),
       FeePayment.aggregate<{ total: number }>([
         {
           $match: {
             status: "paid",
-            createdAt: { $gte: start, $lt: end }
+            createdAt: { $gte: start, $lt: end },
+            organizationId: { $in: activeOrganizationIds }
           }
         },
         { $group: { _id: null, total: { $sum: "$amountPaid" } } }
@@ -57,12 +65,14 @@ dashboardRouter.get(
         {
           $match: {
             paymentStatus: "completed",
-            createdAt: { $gte: start, $lt: end }
+            createdAt: { $gte: start, $lt: end },
+            organizationId: { $in: activeOrganizationIds }
           }
         },
         { $group: { _id: null, total: { $sum: "$totalAmountPaid" } } }
       ]),
       Organization.aggregate([
+        { $match: notDeletedFilter },
         {
           $lookup: {
             from: "students",
@@ -95,7 +105,7 @@ dashboardRouter.get(
         stats: {
           totalOrganizations,
           totalStudents,
-          activePlans,
+          activeOrganizations,
           monthlyRevenue
         },
         organizations

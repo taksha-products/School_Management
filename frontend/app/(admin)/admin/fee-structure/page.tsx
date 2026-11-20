@@ -5,12 +5,13 @@ import Link from "next/link";
 import { Plus, Trash2 } from "lucide-react";
 import { useState, type Dispatch, type SetStateAction } from "react";
 
+import { useAcademicYear, useAcademicYearState } from "@/hooks/useAcademicYear";
 import { PageWrapper } from "@/components/layout/PageWrapper";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
-import { ACADEMIC_YEAR, FEE_HEAD_PRESETS } from "@/lib/constants";
+import { FEE_HEAD_PRESETS } from "@/lib/constants";
 import { useOrgConfig } from "@/hooks/useOrgConfig";
 import { api } from "@/lib/api";
 import type { FeeHead, FeeStructure } from "@/types/schoolFees";
@@ -220,13 +221,14 @@ const FeeStructureForm = ({
 };
 
 const FeeStructurePage = (): JSX.Element => {
+  const orgAcademicYear = useAcademicYear();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const { gradeFilterOptions } = useOrgConfig();
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [name, setName] = useState("");
-  const [academicYear, setAcademicYear] = useState(ACADEMIC_YEAR);
+  const [academicYear, setAcademicYear] = useAcademicYearState();
   const [grades, setGrades] = useState<string[]>([]);
   const [feeHeads, setFeeHeads] = useState<FeeHead[]>([emptyHead()]);
 
@@ -239,7 +241,7 @@ const FeeStructurePage = (): JSX.Element => {
   const resetForm = (): void => {
     setSelectedId(null);
     setName("");
-    setAcademicYear(ACADEMIC_YEAR);
+    setAcademicYear(orgAcademicYear);
     setGrades([]);
     setFeeHeads([emptyHead()]);
   };

@@ -47,10 +47,10 @@
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
   --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.07), 0 2px 4px -2px rgb(0 0 0 / 0.05);
   --shadow-card: 0 1px 3px 0 rgb(0 0 0 / 0.08), 0 1px 2px -1px rgb(0 0 0 / 0.06);
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 8px;
 }
 
 body {
@@ -125,6 +125,16 @@ body {
   .data-table tbody td {
     @apply px-3 py-2.5 text-gray-700;
   }
+
+  .login-input:-webkit-autofill,
+  .login-input:-webkit-autofill:hover,
+  .login-input:-webkit-autofill:focus {
+    -webkit-box-shadow: 0 0 0 1000px #ffffff inset;
+    box-shadow: 0 0 0 1000px #ffffff inset;
+    -webkit-text-fill-color: #171717;
+    caret-color: #171717;
+    transition: background-color 99999s ease-out 0s;
+  }
 }
 
 @media print {
@@ -133,5 +143,15 @@ body {
   }
   body {
     background: white;
+  }
+  @page {
+    margin: 12mm;
+  }
+
+  /* Keep receipt brand header, badges, and tinted bars when printing */
+  .fee-receipt-card,
+  .fee-receipt-card * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 }

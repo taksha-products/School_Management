@@ -2,9 +2,11 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Shield, ShieldCheck, ShieldOff } from "lucide-react";
-import { useState, type JSX } from "react";
+import { useSearchParams } from "next/navigation";
+import { useEffect, useRef, useState, type JSX } from "react";
 
 import { PageWrapper } from "@/components/layout/PageWrapper";
+import { SuperAdminSectionCard } from "@/components/superadmin/SuperAdminSectionCard";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Modal } from "@/components/ui/Modal";
@@ -17,6 +19,8 @@ interface TwoFactorStatusResponse {
   enabled: boolean;
   verifiedAt: string | null;
   backupCodesRemaining: number;
+  needsSetup?: boolean;
+  needsReverify?: boolean;
 }
 
 interface SetupResponse {
@@ -34,9 +38,20 @@ const formatDate = (value: string | null): string => {
 /**
  * Shared 2FA security settings panel for org admin and super admin portals.
  */
-export const SecuritySettings = (): JSX.Element => {
+interface SecuritySettingsProps {
+  /** When true, omit outer page title wrapper (e.g. super admin uses SuperPageWrapper). */
+  embedded?: boolean;
+  /** Super admins must keep 2FA enabled; hides disable and shows mandatory messaging. */
+  superAdminMandatory?: boolean;
+}
+
+export const SecuritySettings = ({
+  embedded = false,
+  superAdminMandatory = false
+}: SecuritySettingsProps): JSX.Element => {
   const { showToast } = useToast();
   const queryClient = useQueryClient();
+  const searchParams = useSearchParams();
 
   const [setupOpen, setSetupOpen] = useState(false);
   const [backupOpen, setBackupOpen] = useState(false);
@@ -113,14 +128,55 @@ export const SecuritySettings = (): JSX.Element => {
 
   const status = statusQuery.data;
   const enabled = status?.enabled ?? false;
+  const setupRequired = superAdminMandatory && (status?.needsSetup ?? !enabled);
 
-  return (
-    <PageWrapper title="Security">
-      <Card className="max-w-2xl p-6">
+  const autoSetupStarted = useRef(false);
+
+  useEffect(() => {
+    if (
+      autoSetupStarted.current ||
+      !setupRequired ||
+      enabled ||
+      setupMutation.isPending ||
+      setupOpen
+    ) {
+      return;
+    }
+
+    const shouldAutoStart =
+      searchParams.get("required") === "setup" || superAdminMandatory;
+
+    if (shouldAutoStart) {
+      autoSetupStarted.current = true;
+      setupMutation.mutate();
+    }
+  }, [
+    setupRequired,
+    enabled,
+    setupMutation.isPending,
+    setupOpen,
+    searchParams,
+    superAdminMandatory,
+    setupMutation
+  ]);
+
+  const SettingsCard = embedded ? SuperAdminSectionCard : Card;
+  const cardClassName = embedded ? "max-w-3xl" : "max-w-2xl p-6";
+
+  const panel = (
+    <>
+      {setupRequired && (
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          Two-factor authentication is mandatory for super admin accounts. Enable it below to
+          access the rest of the portal.
+        </div>
+      )}
+
+      <SettingsCard className={cardClassName}>
         <div className="flex items-start gap-4">
           <div
             className={cn(
-              "flex h-12 w-12 items-center justify-center rounded-xl",
+              "flex h-12 w-12 shrink-0 items-center justify-center rounded-md",
               enabled ? "bg-emerald-50 text-emerald-600" : "bg-amber-50 text-amber-600"
             )}
           >
@@ -163,16 +219,16 @@ export const SecuritySettings = (): JSX.Element => {
                 >
                   {setupMutation.isPending ? "Preparing..." : "Enable 2FA"}
                 </Button>
-              ) : (
+              ) : !superAdminMandatory ? (
                 <Button variant="secondary" onClick={() => setDisableOpen(true)}>
                   <ShieldOff className="mr-2 h-4 w-4" />
                   Disable 2FA
                 </Button>
-              )}
+              ) : null}
             </div>
           </div>
         </div>
-      </Card>
+      </SettingsCard>
 
       <Modal
         isOpen={setupOpen}
@@ -314,6 +370,12 @@ export const SecuritySettings = (): JSX.Element => {
           </div>
         </div>
       </Modal>
-    </PageWrapper>
+    </>
   );
+
+  if (embedded) {
+    return panel;
+  }
+
+  return <PageWrapper title="Security">{panel}</PageWrapper>;
 };

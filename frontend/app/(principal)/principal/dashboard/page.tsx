@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 
+import { useAcademicYear } from "@/hooks/useAcademicYear";
 import { PageWrapper } from "@/components/layout/PageWrapper";
 import { Card } from "@/components/ui/Card";
 import { TableSkeleton } from "@/components/ui/TableSkeleton";
@@ -11,12 +12,13 @@ import type { DashboardSummary, MonthlyReport } from "@/types";
 const currentMonth = new Date().toISOString().slice(0, 7);
 
 const PrincipalDashboardPage = (): JSX.Element => {
+  const orgAcademicYear = useAcademicYear();
   const summaryQuery = useQuery({
     queryKey: ["principal-summary", currentMonth],
     queryFn: async () =>
       (
         await api.get<{ data: DashboardSummary }>("/api/reports/summary", {
-          params: { month: currentMonth, academicYear: "2025-26" }
+          params: { month: currentMonth, academicYear: orgAcademicYear }
         })
       ).data.data
   });
@@ -25,7 +27,7 @@ const PrincipalDashboardPage = (): JSX.Element => {
     queryFn: async () =>
       (
         await api.get<{ data: MonthlyReport[] }>("/api/reports/monthly", {
-          params: { month: currentMonth, academicYear: "2025-26" }
+          params: { month: currentMonth, academicYear: orgAcademicYear }
         })
       ).data.data
   });

@@ -10,7 +10,8 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { TableSkeleton } from "@/components/ui/TableSkeleton";
 import { useToast } from "@/components/ui/Toast";
-import { ACADEMIC_YEAR } from "@/lib/constants";
+import { useAcademicYearState } from "@/hooks/useAcademicYear";
+import { academicYearOptions } from "@/lib/academicYear";
 import { useOrgConfig } from "@/hooks/useOrgConfig";
 import { api } from "@/lib/api";
 import { downloadFromApi } from "@/lib/fileDownload";
@@ -23,7 +24,7 @@ const OutstandingPage = (): JSX.Element => {
   const { gradeFilterOptions } = useOrgConfig();
   const [grade, setGrade] = useState("");
   const [feeHeadName, setFeeHeadName] = useState("");
-  const [academicYear, setAcademicYear] = useState(ACADEMIC_YEAR);
+  const [academicYear, setAcademicYear] = useAcademicYearState();
   const [page, setPage] = useState(1);
   const [isExporting, setIsExporting] = useState(false);
 
@@ -127,7 +128,11 @@ const OutstandingPage = (): JSX.Element => {
             onChange={(e) => setAcademicYear(e.target.value)}
             className="rounded border px-3 py-2 text-sm"
           >
-            <option value={ACADEMIC_YEAR}>{ACADEMIC_YEAR}</option>
+            {academicYearOptions(academicYear).map((year) => (
+              <option key={year} value={year}>
+                {year}
+              </option>
+            ))}
           </select>
           <Button variant="secondary" type="button" onClick={handleExport} disabled={isExporting}>
             {isExporting ? "Exporting..." : "Export to Excel"}
@@ -157,7 +162,7 @@ const OutstandingPage = (): JSX.Element => {
                     <td>{formatINR(row.totalPaid)}</td>
                     <td className="font-semibold text-rose-600">{formatINR(row.balance)}</td>
                     <td>
-                      <Link href={`/admin/fees/collect?studentId=${row.studentId}`}>
+                      <Link href={`/admin/fees/collect/${row.studentId}`}>
                         <Button
                           size="sm"
                           variant="secondary"

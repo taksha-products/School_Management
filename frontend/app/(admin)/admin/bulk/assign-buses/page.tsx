@@ -1,24 +1,55 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { useAcademicYear } from "@/hooks/useAcademicYear";
 import { PageWrapper } from "@/components/layout/PageWrapper";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { TableSkeleton } from "@/components/ui/TableSkeleton";
 import { useToast } from "@/components/ui/Toast";
 import { api } from "@/lib/api";
-import { useOrgConfig } from "@/hooks/useOrgConfig";
+import { formatGradeDisplay, useOrgConfig } from "@/hooks/useOrgConfig";
 import type { Bus, Student } from "@/types";
+import type { PaginatedResponse } from "@/types/pagination";
 
-const ACADEMIC_YEAR = "2025-26";
+
+const fetchActiveStudentsForGrade = async (
+  grade: string,
+  section?: string
+): Promise<Student[]> => {
+  const collected: Student[] = [];
+  let page = 1;
+  let hasNext = true;
+
+  while (hasNext && page <= 20) {
+    const response = await api.get<PaginatedResponse<Student>>("/api/students", {
+      params: {
+        status: "active",
+        withTransport: true,
+        grade,
+        section: section || undefined,
+        page,
+        limit: 100
+      }
+    });
+    collected.push(...response.data.data);
+    hasNext =
+      response.data.pagination.hasNext ?? page < response.data.pagination.totalPages;
+    page += 1;
+  }
+
+  return collected;
+};
 
 const AssignBusesPage = (): JSX.Element => {
+  const orgAcademicYear = useAcademicYear();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
-  const { gradeOptions } = useOrgConfig();
+  const { gradeOptions, getSectionsForGrade, hasAnySections } = useOrgConfig();
   const [gradeFilter, setGradeFilter] = useState("");
+  const [sectionFilter, setSectionFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("active");
   const [transportBusFilter, setTransportBusFilter] = useState("");
   const [selectedBusId, setSelectedBusId] = useState("");
@@ -26,26 +57,50 @@ const AssignBusesPage = (): JSX.Element => {
   const [monthlyTransportFee, setMonthlyTransportFee] = useState(1500);
   const [effectiveFrom, setEffectiveFrom] = useState(new Date().toISOString().slice(0, 10));
   const [shortcutGrade, setShortcutGrade] = useState("");
+  const [shortcutSection, setShortcutSection] = useState("");
   const [shortcutBusId, setShortcutBusId] = useState("");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+
+  const sectionOptions = useMemo(
+    () => (gradeFilter ? getSectionsForGrade(gradeFilter) : []),
+    [gradeFilter, getSectionsForGrade]
+  );
+  const shortcutSectionOptions = useMemo(
+    () => (shortcutGrade ? getSectionsForGrade(shortcutGrade) : []),
+    [shortcutGrade, getSectionsForGrade]
+  );
+
+  useEffect(() => {
+    setSectionFilter("");
+  }, [gradeFilter]);
+
+  useEffect(() => {
+    setShortcutSection("");
+  }, [shortcutGrade]);
 
   const busesQuery = useQuery({
     queryKey: ["bulk-assign-buses"],
     queryFn: async () => (await api.get<{ data: Bus[] }>("/api/buses")).data.data
   });
   const studentsQuery = useQuery({
-    queryKey: ["bulk-assign-students", statusFilter],
+    queryKey: ["bulk-assign-students", statusFilter, gradeFilter, sectionFilter],
     queryFn: async () =>
       (
         await api.get<{ data: Student[] }>("/api/students", {
-          params: { status: statusFilter, withTransport: true, page: 1, limit: 100 }
+          params: {
+            status: statusFilter,
+            withTransport: true,
+            page: 1,
+            limit: 100,
+            grade: gradeFilter || undefined,
+            section: sectionFilter || undefined
+          }
         })
       ).data.data
   });
 
   const visibleStudents = useMemo(() => {
     return (studentsQuery.data ?? []).filter((student) => {
-      if (gradeFilter && student.grade !== gradeFilter) return false;
       if (transportBusFilter) {
         const busId = student.transport?.busId;
         const id = typeof busId === "string" ? busId : undefined;
@@ -53,18 +108,46 @@ const AssignBusesPage = (): JSX.Element => {
       }
       return true;
     });
-  }, [studentsQuery.data, transportBusFilter, gradeFilter]);
+  }, [studentsQuery.data, transportBusFilter]);
 
   const selectedBus = useMemo(
     () => (busesQuery.data ?? []).find((bus) => bus._id === selectedBusId),
     [busesQuery.data, selectedBusId]
   );
+  const shortcutBus = useMemo(
+    () => (busesQuery.data ?? []).find((bus) => bus._id === shortcutBusId),
+    [busesQuery.data, shortcutBusId]
+  );
   const selectedBusCurrentCount = selectedBus?.activeStudentCount ?? 0;
+
+  const seatsToAssign = useMemo(() => {
+    const selectedSet = new Set(selectedIds);
+    return (studentsQuery.data ?? []).filter(
+      (student) => selectedSet.has(student._id) && !student.transport
+    ).length;
+  }, [studentsQuery.data, selectedIds]);
 
   const capacityExceeded = !!(
     selectedBus &&
     selectedBus.capacity > 0 &&
-    selectedBusCurrentCount + selectedIds.length > selectedBus.capacity
+    selectedBusCurrentCount + seatsToAssign > selectedBus.capacity
+  );
+
+  const gradeStudentsQuery = useQuery({
+    queryKey: ["bulk-grade-transport-eligible", shortcutGrade, shortcutSection],
+    enabled: Boolean(shortcutGrade),
+    queryFn: () => fetchActiveStudentsForGrade(shortcutGrade, shortcutSection || undefined)
+  });
+
+  const gradeSeatsToAssign = useMemo(
+    () => (gradeStudentsQuery.data ?? []).filter((student) => !student.transport).length,
+    [gradeStudentsQuery.data]
+  );
+
+  const shortcutCapacityExceeded = !!(
+    shortcutBus &&
+    shortcutBus.capacity > 0 &&
+    (shortcutBus.activeStudentCount ?? 0) + gradeSeatsToAssign > shortcutBus.capacity
   );
 
   const toggleStudent = (id: string): void => {
@@ -86,7 +169,7 @@ const AssignBusesPage = (): JSX.Element => {
         {
           studentIds: selectedIds,
           busId: selectedBusId,
-          academicYear: ACADEMIC_YEAR,
+          academicYear: orgAcademicYear,
           monthlyTransportFee,
           pickupStop: pickupStop || undefined,
           effectiveFrom
@@ -104,7 +187,12 @@ const AssignBusesPage = (): JSX.Element => {
         }`
       );
     },
-    onError: () => showToast("error", "Failed to assign transport")
+    onError: (error: unknown) => {
+      const message =
+        (error as { response?: { data?: { message?: string } } })?.response?.data?.message ??
+        "Failed to assign transport";
+      showToast("error", message);
+    }
   });
 
   const assignGradeMutation = useMutation({
@@ -113,8 +201,9 @@ const AssignBusesPage = (): JSX.Element => {
         "/api/bulk/students/assign-bus-by-grade",
         {
           grade: shortcutGrade,
+          section: shortcutSection || undefined,
           busId: shortcutBusId,
-          academicYear: ACADEMIC_YEAR,
+          academicYear: orgAcademicYear,
           monthlyTransportFee,
           pickupStop: pickupStop || undefined,
           effectiveFrom
@@ -125,12 +214,17 @@ const AssignBusesPage = (): JSX.Element => {
       queryClient.invalidateQueries({ queryKey: ["students"] });
       showToast(
         "success",
-        `Registered ${res.data.data.created} students in grade ${shortcutGrade}${
+        `Registered ${res.data.data.created} students in ${formatGradeDisplay(shortcutGrade, shortcutSection || null)}${
           res.data.data.skipped ? `, ${res.data.data.skipped} skipped` : ""
         }`
       );
     },
-    onError: () => showToast("error", "Failed to assign grade")
+    onError: (error: unknown) => {
+      const message =
+        (error as { response?: { data?: { message?: string } } })?.response?.data?.message ??
+        "Failed to assign grade";
+      showToast("error", message);
+    }
   });
 
   return (
@@ -141,7 +235,7 @@ const AssignBusesPage = (): JSX.Element => {
       </p>
       <div className="grid gap-6 xl:grid-cols-2">
         <Card title="Select Students">
-          <div className="mb-3 grid gap-2 md:grid-cols-3">
+          <div className={`mb-3 grid gap-2 ${hasAnySections ? "md:grid-cols-4" : "md:grid-cols-3"}`}>
             <select
               value={gradeFilter}
               onChange={(e) => setGradeFilter(e.target.value)}
@@ -156,6 +250,27 @@ const AssignBusesPage = (): JSX.Element => {
                 )
               )}
             </select>
+            {hasAnySections && (
+              <select
+                value={sectionFilter}
+                onChange={(e) => setSectionFilter(e.target.value)}
+                disabled={!gradeFilter || sectionOptions.length === 0}
+                className="rounded border px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-400"
+              >
+                <option value="">
+                  {!gradeFilter
+                    ? "Select grade first"
+                    : sectionOptions.length === 0
+                      ? "No sections"
+                      : "All sections"}
+                </option>
+                {sectionOptions.map((section) => (
+                  <option key={section} value={section}>
+                    Section {section}
+                  </option>
+                ))}
+              </select>
+            )}
             <select
               value={transportBusFilter}
               onChange={(e) => setTransportBusFilter(e.target.value)}
@@ -211,7 +326,7 @@ const AssignBusesPage = (): JSX.Element => {
                       <div>
                         <p className="font-medium text-slate-800">{student.name}</p>
                         <p className="text-xs text-slate-600">
-                          Grade {student.grade} · Transport:{" "}
+                          {formatGradeDisplay(student.grade, student.section)} · Transport:{" "}
                           {student.transport?.busNumber ?? "No bus"}
                         </p>
                       </div>
@@ -265,11 +380,12 @@ const AssignBusesPage = (): JSX.Element => {
               <p>Route: {selectedBus.routeName}</p>
               <p>Driver: {selectedBus.driverName}</p>
               <p>
-                Capacity: {selectedBusCurrentCount + selectedIds.length}/{selectedBus.capacity}
+                Capacity: {selectedBusCurrentCount + seatsToAssign}/{selectedBus.capacity}
+                {seatsToAssign > 0 ? ` (${seatsToAssign} new seat${seatsToAssign === 1 ? "" : "s"})` : ""}
               </p>
               {capacityExceeded && (
-                <p className="mt-1 font-semibold text-amber-700">
-                  Capacity warning: this bus may exceed capacity.
+                <p className="mt-1 font-semibold text-red-700">
+                  Bus capacity exceeded. Reduce your selection or choose another bus.
                 </p>
               )}
             </div>
@@ -277,11 +393,16 @@ const AssignBusesPage = (): JSX.Element => {
 
           <Button
             className="mt-4"
-            disabled={!selectedBusId || selectedIds.length === 0 || assignMutation.isPending}
+            disabled={
+              !selectedBusId ||
+              seatsToAssign === 0 ||
+              capacityExceeded ||
+              assignMutation.isPending
+            }
             onClick={() => {
-              if (!selectedBus) return;
+              if (!selectedBus || capacityExceeded) return;
               const confirmed = window.confirm(
-                `Register ${selectedIds.length} students for ${selectedBus.busNumber} (${selectedBus.routeName})?`
+                `Register ${seatsToAssign} student${seatsToAssign === 1 ? "" : "s"} for ${selectedBus.busNumber} (${selectedBus.routeName})?`
               );
               if (confirmed) assignMutation.mutate();
             }}
@@ -291,7 +412,19 @@ const AssignBusesPage = (): JSX.Element => {
 
           <div className="mt-7 border-t border-slate-200 pt-4">
             <h3 className="mb-3 text-sm font-semibold text-slate-700">Register entire grade</h3>
-            <div className="grid gap-2 md:grid-cols-3">
+            {shortcutBus && shortcutGrade && (
+              <p className="mb-2 text-sm text-slate-600">
+                {gradeSeatsToAssign} student{gradeSeatsToAssign === 1 ? "" : "s"} without transport
+                · Bus capacity: {(shortcutBus.activeStudentCount ?? 0) + gradeSeatsToAssign}/
+                {shortcutBus.capacity}
+              </p>
+            )}
+            {shortcutCapacityExceeded && (
+              <p className="mb-2 text-sm font-semibold text-red-700">
+                Bus capacity exceeded for this grade. Choose a larger bus or assign in smaller groups.
+              </p>
+            )}
+            <div className={`grid gap-2 ${hasAnySections ? "md:grid-cols-4" : "md:grid-cols-3"}`}>
               <select
                 value={shortcutGrade}
                 onChange={(e) => setShortcutGrade(e.target.value)}
@@ -306,6 +439,27 @@ const AssignBusesPage = (): JSX.Element => {
                   )
                 )}
               </select>
+              {hasAnySections && (
+                <select
+                  value={shortcutSection}
+                  onChange={(e) => setShortcutSection(e.target.value)}
+                  disabled={!shortcutGrade || shortcutSectionOptions.length === 0}
+                  className="rounded border px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-400"
+                >
+                  <option value="">
+                    {!shortcutGrade
+                      ? "Select grade first"
+                      : shortcutSectionOptions.length === 0
+                        ? "No sections"
+                        : "All sections"}
+                  </option>
+                  {shortcutSectionOptions.map((section) => (
+                    <option key={section} value={section}>
+                      Section {section}
+                    </option>
+                  ))}
+                </select>
+              )}
               <select
                 value={shortcutBusId}
                 onChange={(e) => setShortcutBusId(e.target.value)}
@@ -321,10 +475,17 @@ const AssignBusesPage = (): JSX.Element => {
                   ))}
               </select>
               <Button
-                disabled={!shortcutGrade || !shortcutBusId || assignGradeMutation.isPending}
+                disabled={
+                  !shortcutGrade ||
+                  !shortcutBusId ||
+                  gradeSeatsToAssign === 0 ||
+                  shortcutCapacityExceeded ||
+                  assignGradeMutation.isPending
+                }
                 onClick={() => {
+                  const target = formatGradeDisplay(shortcutGrade, shortcutSection || null);
                   const ok = window.confirm(
-                    `Register all active students in Grade ${shortcutGrade} for selected bus?`
+                    `Register ${gradeSeatsToAssign} student${gradeSeatsToAssign === 1 ? "" : "s"} in ${target} for selected bus?`
                   );
                   if (ok) assignGradeMutation.mutate();
                 }}

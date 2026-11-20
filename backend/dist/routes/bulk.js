@@ -18,6 +18,7 @@ const Student_1 = require("../models/Student");
 const StudentTransport_1 = require("../models/StudentTransport");
 const StudentFeeAssignment_1 = require("../models/StudentFeeAssignment");
 const asyncHandler_1 = require("../utils/asyncHandler");
+const busCapacity_1 = require("../utils/busCapacity");
 const excelParser_1 = require("../utils/excelParser");
 const orgFilter_1 = require("../utils/orgFilter");
 const orgGradeConfig_1 = require("../utils/orgGradeConfig");
@@ -354,18 +355,29 @@ bulkRouter.post("/students/assign-bus", ...bulkGuard, (0, asyncHandler_1.asyncHa
     }).select("_id");
     const foundIds = new Set(students.map((student) => student._id.toString()));
     const notFound = objectIds.filter((id) => !foundIds.has(id.toString())).length;
+    const activeOnBus = await (0, busCapacity_1.countActiveStudentsOnBus)(orgId, bus._id);
+    const existingTransports = await StudentTransport_1.StudentTransport.find({
+        organizationId: new mongoose_1.Types.ObjectId(orgId),
+        studentId: { $in: students.map((student) => student._id) },
+        status: "active"
+    }).select("studentId");
+    const studentsWithTransport = new Set(existingTransports.map((transport) => transport.studentId.toString()));
+    const seatsNeeded = students.filter((student) => !studentsWithTransport.has(student._id.toString())).length;
+    if ((0, busCapacity_1.wouldExceedBusCapacity)(bus.capacity, activeOnBus, seatsNeeded)) {
+        res.status(400).json({
+            success: false,
+            data: null,
+            message: (0, busCapacity_1.busCapacityExceededMessage)(bus.busNumber, bus.capacity, activeOnBus, seatsNeeded)
+        });
+        return;
+    }
     const fee = Number(monthlyTransportFee ?? 1500);
     const effectiveFromDate = effectiveFrom ? new Date(effectiveFrom) : new Date();
     let created = 0;
     let skipped = 0;
     const failures = [];
     for (const student of students) {
-        const existing = await StudentTransport_1.StudentTransport.findOne({
-            organizationId: new mongoose_1.Types.ObjectId(orgId),
-            studentId: student._id,
-            status: "active"
-        });
-        if (existing) {
+        if (studentsWithTransport.has(student._id.toString())) {
             skipped += 1;
             failures.push({
                 studentId: student._id.toString(),
@@ -401,7 +413,7 @@ bulkRouter.post("/students/assign-bus", ...bulkGuard, (0, asyncHandler_1.asyncHa
 bulkRouter.post("/students/assign-bus-by-grade", ...bulkGuard, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     const authReq = req;
     const orgId = (0, orgFilter_1.getScopedOrganizationId)(authReq, res);
-    const { grade, busId, academicYear, monthlyTransportFee, pickupStop, effectiveFrom } = req.body;
+    const { grade, section, busId, academicYear, monthlyTransportFee, pickupStop, effectiveFrom } = req.body;
     if (!grade || !busId || !academicYear || !mongoose_1.Types.ObjectId.isValid(busId)) {
         res.status(400).json({
             success: false,
@@ -419,22 +431,38 @@ bulkRouter.post("/students/assign-bus-by-grade", ...bulkGuard, (0, asyncHandler_
         res.status(404).json({ success: false, data: null, message: "Active bus not found" });
         return;
     }
-    const gradeStudents = await Student_1.Student.find({
+    const studentFilter = {
         organizationId: new mongoose_1.Types.ObjectId(orgId),
         status: "active",
         grade
-    }).select("_id");
+    };
+    const sectionFilter = typeof section === "string" ? section.trim() : "";
+    if (sectionFilter) {
+        studentFilter.section = sectionFilter;
+    }
+    const gradeStudents = await Student_1.Student.find(studentFilter).select("_id");
+    const activeOnBus = await (0, busCapacity_1.countActiveStudentsOnBus)(orgId, bus._id);
+    const existingTransports = await StudentTransport_1.StudentTransport.find({
+        organizationId: new mongoose_1.Types.ObjectId(orgId),
+        studentId: { $in: gradeStudents.map((student) => student._id) },
+        status: "active"
+    }).select("studentId");
+    const studentsWithTransport = new Set(existingTransports.map((transport) => transport.studentId.toString()));
+    const seatsNeeded = gradeStudents.filter((student) => !studentsWithTransport.has(student._id.toString())).length;
+    if ((0, busCapacity_1.wouldExceedBusCapacity)(bus.capacity, activeOnBus, seatsNeeded)) {
+        res.status(400).json({
+            success: false,
+            data: null,
+            message: (0, busCapacity_1.busCapacityExceededMessage)(bus.busNumber, bus.capacity, activeOnBus, seatsNeeded)
+        });
+        return;
+    }
     const fee = Number(monthlyTransportFee ?? 1500);
     const effectiveFromDate = effectiveFrom ? new Date(effectiveFrom) : new Date();
     let created = 0;
     let skipped = 0;
     for (const student of gradeStudents) {
-        const existing = await StudentTransport_1.StudentTransport.findOne({
-            organizationId: new mongoose_1.Types.ObjectId(orgId),
-            studentId: student._id,
-            status: "active"
-        });
-        if (existing) {
+        if (studentsWithTransport.has(student._id.toString())) {
             skipped += 1;
             continue;
         }
@@ -753,10 +781,12 @@ bulkRouter.post("/students/promote", ...bulkGuard, (0, asyncHandler_1.asyncHandl
 bulkRouter.get("/export/students", ...bulkGuard, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     const authReq = req;
     const orgId = (0, orgFilter_1.getScopedOrganizationId)(authReq, res);
-    const { grade, busId, status, academicYear } = req.query;
+    const { grade, section, busId, status, academicYear } = req.query;
     const filter = { ...(0, orgFilter_1.orgFilter)(authReq, res) };
     if (grade)
         filter.grade = grade;
+    if (section)
+        filter.section = section;
     if (status)
         filter.status = status;
     if (academicYear)

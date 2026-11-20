@@ -9,6 +9,11 @@ import { Bus } from "../models/Bus";
 import { Student } from "../models/Student";
 import { StudentTransport } from "../models/StudentTransport";
 import { asyncHandler } from "../utils/asyncHandler";
+import {
+  busCapacityExceededMessage,
+  countActiveStudentsOnBus,
+  wouldExceedBusCapacity
+} from "../utils/busCapacity";
 import { invalidateOrgReportsCache } from "../utils/cache";
 import { getScopedOrganizationId, orgFilter } from "../utils/orgFilter";
 
@@ -187,12 +192,15 @@ transportRouter.post(
     const fee = Number(monthlyTransportFee ?? 1500);
     const effectiveFromDate = effectiveFrom ? new Date(effectiveFrom) : new Date();
 
-    const activeCount = await StudentTransport.countDocuments({
-      organizationId: orgId,
-      busId: bus._id,
-      status: "active"
-    });
-    const atCapacity = activeCount >= bus.capacity;
+    const activeCount = await countActiveStudentsOnBus(orgId, bus._id);
+    if (wouldExceedBusCapacity(bus.capacity, activeCount, 1)) {
+      res.status(400).json({
+        success: false,
+        data: null,
+        message: busCapacityExceededMessage(bus.busNumber, bus.capacity, activeCount, 1)
+      });
+      return;
+    }
 
     const record = await StudentTransport.create({
       organizationId: orgId,
@@ -212,12 +220,7 @@ transportRouter.post(
     res.status(201).json({
       success: true,
       data: record,
-      message: "Student registered for bus transport",
-      ...(atCapacity
-        ? {
-            warning: `Bus ${bus.busNumber} is at capacity (${activeCount}/${bus.capacity})`
-          }
-        : {})
+      message: "Student registered for bus transport"
     });
   })
 );
@@ -253,6 +256,21 @@ transportRouter.put(
       const newBus = await Bus.findOne({ _id: busId, organizationId: orgId, status: "active" });
       if (!newBus) {
         res.status(404).json({ success: false, data: null, message: "Bus not found or inactive" });
+        return;
+      }
+
+      const activeOnNewBus = await countActiveStudentsOnBus(orgId, newBus._id);
+      if (wouldExceedBusCapacity(newBus.capacity, activeOnNewBus, 1)) {
+        res.status(400).json({
+          success: false,
+          data: null,
+          message: busCapacityExceededMessage(
+            newBus.busNumber,
+            newBus.capacity,
+            activeOnNewBus,
+            1
+          )
+        });
         return;
       }
 

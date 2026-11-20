@@ -1,12 +1,26 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useRef, useState } from "react";
 
-import { ReceiptOrgHeader } from "@/components/shared/BrandLogo";
-import { Button } from "@/components/ui/Button";
+import { FeeReceiptCard } from "@/components/shared/FeeReceiptCard";
+import { useToast } from "@/components/ui/Toast";
 import { api } from "@/lib/api";
-import { formatINR } from "@/lib/utils";
+import { downloadReceiptPdf } from "@/lib/downloadReceiptPdf";
+import {
+  formatBusLabel,
+  formatReceiptDisplayId,
+  formatTransportMonthPeriod
+} from "@/lib/receiptFormat";
+import type { ReceiptOrgBranding } from "@/types/orgTheme";
+
+interface GroupedMonthRow {
+  month: string;
+  status: string;
+  amountPaid: number;
+  amountDue: number;
+}
 
 interface ReceiptData {
   studentName: string;
@@ -15,34 +29,26 @@ interface ReceiptData {
   month: string;
   monthlyFee: number;
   amountPaid: number;
+  amountDue?: number;
   status: string;
   paidAt?: string;
   collectedBy: string;
   receiptNumber: string;
+  paymentMode?: string;
+  organization?: ReceiptOrgBranding | null;
+  isPartOfGroup?: boolean;
+  isAdvance?: boolean;
+  groupReceiptNumber?: string | null;
+  groupedMonths?: GroupedMonthRow[];
 }
 
-const formatIndianDate = (date?: string): string =>
-  date
-    ? new Date(date).toLocaleDateString("en-IN", {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric"
-      })
-    : "-";
-
-const formatReceiptMonth = (month?: string): string =>
-  month
-    ? new Date(`${month}-01`).toLocaleDateString("en-IN", {
-        month: "long",
-        year: "numeric"
-      })
-    : "-";
-
-const capitalizeStatus = (status?: string): string =>
-  status ? status.charAt(0).toUpperCase() + status.slice(1).toLowerCase() : "-";
-
-const ReceiptPage = (): JSX.Element => {
+const ReceiptContent = (): JSX.Element => {
   const params = useParams<{ paymentId: string }>();
+  const searchParams = useSearchParams();
+  const { showToast } = useToast();
+  const receiptRef = useRef<HTMLDivElement>(null);
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const autoDownload = searchParams.get("download") === "pdf";
 
   const receiptQuery = useQuery({
     queryKey: ["receipt", params.paymentId],
@@ -53,73 +59,96 @@ const ReceiptPage = (): JSX.Element => {
   });
 
   const receipt = receiptQuery.data;
-  const statusText = capitalizeStatus(receipt?.status);
-  const statusClass =
-    receipt?.status === "paid"
-      ? "bg-emerald-100 text-emerald-700"
-      : receipt?.status === "partial"
-        ? "bg-yellow-100 text-yellow-700"
-        : receipt?.status === "pending"
-          ? "bg-orange-100 text-orange-700"
-          : "bg-rose-100 text-rose-700";
+
+  const handleDownloadPdf = async (): Promise<void> => {
+    if (!receiptRef.current || !receipt) {
+      return;
+    }
+    setPdfLoading(true);
+    try {
+      await downloadReceiptPdf(
+        receiptRef.current,
+        `transport-receipt-${formatReceiptDisplayId(receipt.receiptNumber)}.pdf`
+      );
+      showToast("success", "Receipt PDF downloaded");
+    } catch {
+      showToast("error", "Could not generate PDF");
+    } finally {
+      setPdfLoading(false);
+    }
+  };
+
+  const didAutoDownload = useRef(false);
+
+  useEffect(() => {
+    if (!autoDownload || !receipt || receiptQuery.isLoading || didAutoDownload.current) {
+      return;
+    }
+    didAutoDownload.current = true;
+    void handleDownloadPdf();
+  }, [autoDownload, receipt, receiptQuery.isLoading]);
+
+  if (receiptQuery.isLoading) {
+    return <p className="p-8 text-center text-slate-500">Loading receipt...</p>;
+  }
+
+  if (!receipt) {
+    return <p className="p-8 text-center text-rose-500">Receipt not found</p>;
+  }
+
+  const studentMeta = [receipt.grade, formatBusLabel(receipt.busNumber)]
+    .filter(Boolean)
+    .join(" · ");
+
+  const isAdvance = receipt.isPartOfGroup && receipt.groupedMonths && receipt.groupedMonths.length > 0;
+
+  const lineItems = isAdvance
+    ? receipt.groupedMonths!.map((row) => ({
+        label: formatTransportMonthPeriod(row.month),
+        amount: row.amountPaid
+      }))
+    : undefined;
+
+  const periodLabel = isAdvance
+    ? receipt.groupedMonths!.map((g) => formatTransportMonthPeriod(g.month)).join(" · ")
+    : formatTransportMonthPeriod(receipt.month);
+
+  const receiptType = receipt.isAdvance ? "Advance Payment Receipt" : "Transport Fee";
+
+  const displayReceiptNumber =
+    receipt.groupReceiptNumber ?? receipt.receiptNumber;
+
+  const amountDue = receipt.amountDue ?? receipt.monthlyFee;
+  const amountPaid = receipt.amountPaid;
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-2xl flex-col items-center justify-center bg-gray-50 p-6 print:bg-white">
-      <div className="w-full max-w-[520px] rounded-2xl border border-gray-200 bg-white p-8 text-gray-900 shadow-md print:border-0 print:shadow-none">
-        <div className="mb-5 flex items-start justify-between gap-4">
-          <ReceiptOrgHeader subtitle="Transport Fee Receipt" />
-          <div className="text-right">
-            <p className="text-xs font-medium uppercase tracking-wide text-gray-400">Receipt</p>
-            <p className="text-sm font-semibold text-gray-700">{receipt?.receiptNumber ?? "-"}</p>
-          </div>
-        </div>
-        <div className="mb-5 h-0.5 w-full bg-primary" />
-
-        <div className="grid grid-cols-2 gap-y-3 text-sm">
-          <p className="text-gray-500">Student Name</p>
-          <p className="text-right font-medium text-gray-900">{receipt?.studentName ?? "-"}</p>
-
-          <p className="text-gray-500">Bus</p>
-          <p className="text-right font-medium text-gray-900">{receipt?.busNumber ?? "-"}</p>
-
-          <p className="text-gray-500">Grade</p>
-          <p className="text-right font-medium text-gray-900">{receipt?.grade ?? "-"}</p>
-
-          <p className="text-gray-500">Month</p>
-          <p className="text-right font-medium text-gray-900">{formatReceiptMonth(receipt?.month)}</p>
-
-          <p className="text-gray-500">Amount Due</p>
-          <p className="text-right font-medium text-gray-900">{formatINR(receipt?.monthlyFee ?? 0)}</p>
-
-          <p className="text-gray-500">Amount Paid</p>
-          <p className="text-right text-lg font-bold text-gray-900">{formatINR(receipt?.amountPaid ?? 0)}</p>
-
-          <p className="text-gray-500">Status</p>
-          <div className="text-right">
-            <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${statusClass}`}>
-              {statusText}
-            </span>
-          </div>
-
-          <p className="text-gray-500">Payment Date</p>
-          <p className="text-right font-medium text-gray-900">{formatIndianDate(receipt?.paidAt)}</p>
-
-          <p className="text-gray-500">Collected By</p>
-          <p className="text-right font-medium text-gray-900">{receipt?.collectedBy ?? "-"}</p>
-        </div>
-
-        <div className="-mx-8 -mb-8 mt-6 rounded-b-2xl bg-primary-50 px-8 py-4">
-          <p className="text-center text-xs text-gray-600">
-            Thank you for your payment. Please keep this receipt for records.
-          </p>
-        </div>
-      </div>
-
-      <Button className="no-print mt-4" onClick={() => window.print()}>
-        Print
-      </Button>
+    <div className="mx-auto flex min-h-screen w-full flex-col items-center justify-center bg-slate-100 p-6 print:bg-white">
+      <FeeReceiptCard
+        contentRef={receiptRef}
+        branding={receipt.organization ?? null}
+        receiptType={receiptType}
+        period={periodLabel}
+        receiptNumber={displayReceiptNumber}
+        studentName={receipt.studentName}
+        studentMeta={studentMeta || "—"}
+        status={receipt.status}
+        paymentDate={receipt.paidAt}
+        collectedBy={receipt.collectedBy}
+        paymentMode={receipt.paymentMode}
+        amountDue={amountDue}
+        amountPaid={amountPaid}
+        lineItems={lineItems}
+        pdfLoading={pdfLoading}
+        onDownloadPdf={() => void handleDownloadPdf()}
+      />
     </div>
   );
 };
+
+const ReceiptPage = (): JSX.Element => (
+  <Suspense fallback={<p className="p-8 text-center text-slate-500">Loading receipt...</p>}>
+    <ReceiptContent />
+  </Suspense>
+);
 
 export default ReceiptPage;

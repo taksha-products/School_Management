@@ -1,6 +1,7 @@
 import axios, { type AxiosError, type InternalAxiosRequestConfig } from "axios";
 
 import { clearUser } from "./auth";
+import { dispatchSuperAdminTwoFactorGate } from "./twoFactorGate";
 
 const resolveBaseUrl = (): string => {
   if (process.env.NEXT_PUBLIC_API_URL) {
@@ -63,6 +64,17 @@ api.interceptors.response.use(
     const isAuthLogout = requestUrl.includes("/api/auth/logout");
     const isVerify2FA = requestUrl.includes("/api/auth/verify-2fa");
     const is2FAAuth = requestUrl.includes("/api/auth/2fa");
+
+    if (
+      status === 403 &&
+      (code === "2FA_REQUIRED" || code === "2FA_SETUP_REQUIRED") &&
+      typeof window !== "undefined" &&
+      window.location.pathname.startsWith("/super") &&
+      !is2FAAuth
+    ) {
+      dispatchSuperAdminTwoFactorGate(code);
+      return Promise.reject(error);
+    }
 
     if (
       status !== 401 ||

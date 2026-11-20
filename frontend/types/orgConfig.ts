@@ -17,6 +17,8 @@ export interface OrgGradeEntry {
 export interface OrgGradeConfig {
   institutionType: InstitutionType;
   grades: OrgGradeEntry[];
+  /** Org's current academic year, e.g. "2026-27". */
+  currentAcademicYear?: string;
 }
 
 export interface InstitutionTemplate {

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 
+import { useAcademicYear } from "@/hooks/useAcademicYear";
 import { BulkProgressStepper } from "@/components/shared/BulkProgressStepper";
 import { PageWrapper } from "@/components/layout/PageWrapper";
 import { Button } from "@/components/ui/Button";
@@ -25,6 +26,7 @@ const STEPS = ["Select fee structure", "Select students", "Preview & confirm"];
 type TargetMode = "grades" | "students";
 
 const AssignFeesPage = (): JSX.Element => {
+  const orgAcademicYear = useAcademicYear();
   const { showToast } = useToast();
   const { gradeOptions } = useOrgConfig();
   const [step, setStep] = useState(1);
@@ -207,7 +209,7 @@ const AssignFeesPage = (): JSX.Element => {
                   value={academicYear}
                   onChange={(e) => setAcademicYear(e.target.value)}
                   className="w-full rounded border border-slate-200 px-3 py-2"
-                  placeholder="2025-26"
+                  placeholder={orgAcademicYear}
                 />
               </div>
 

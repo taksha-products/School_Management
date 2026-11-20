@@ -12,12 +12,15 @@ interface StudentSearchProps {
   onSelect: (student: Student) => void;
   placeholder?: string;
   className?: string;
+  /** When true, only students with active bus transport appear in results. */
+  activeTransportOnly?: boolean;
 }
 
 export const StudentSearch = ({
   onSelect,
   placeholder = "Search student by name...",
-  className
+  className,
+  activeTransportOnly = false
 }: StudentSearchProps): JSX.Element => {
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
@@ -33,7 +36,13 @@ export const StudentSearch = ({
     queryFn: async () =>
       (
         await api.get<{ data: Student[] }>("/api/students", {
-          params: { search: debounced, status: "active", withTransport: true, page: 1, limit: 20 }
+          params: {
+            search: debounced,
+            status: "active",
+            ...(activeTransportOnly ? { withTransport: true } : {}),
+            page: 1,
+            limit: 20
+          }
         })
       ).data.data,
     enabled: debounced.length >= 2

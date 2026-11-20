@@ -99,13 +99,14 @@ studentsRouter.get(
   allowStudentRead,
   asyncHandler(async (req, res) => {
     const authReq = req as AuthenticatedRequest;
-    const { busId, search, status, withTransport, academicYear, grade } = req.query as {
+    const { busId, search, status, withTransport, academicYear, grade, section } = req.query as {
       busId?: string;
       search?: string;
       status?: string;
       withTransport?: string;
       academicYear?: string;
       grade?: string;
+      section?: string;
     };
 
     const filter: Record<string, unknown> = {
@@ -120,6 +121,11 @@ studentsRouter.get(
     const gradeFilter = typeof grade === "string" ? grade.trim() : "";
     if (gradeFilter) {
       filter.grade = gradeFilter;
+    }
+
+    const sectionFilter = typeof section === "string" ? section.trim() : "";
+    if (sectionFilter) {
+      filter.section = sectionFilter;
     }
 
     if (busId && Types.ObjectId.isValid(busId)) {
@@ -161,6 +167,8 @@ studentsRouter.get(
         transport: formatTransport(transportByStudent.get(String(student._id)) ?? null)
       }));
 
+      const totalPages = Math.ceil(total / limit) || 1;
+
       res.json({
         success: true,
         data,
@@ -168,7 +176,9 @@ studentsRouter.get(
           page,
           limit,
           total,
-          totalPages: Math.ceil(total / limit) || 1
+          totalPages,
+          hasNext: page < totalPages,
+          hasPrev: page > 1
         },
         message: "Students fetched successfully"
       });

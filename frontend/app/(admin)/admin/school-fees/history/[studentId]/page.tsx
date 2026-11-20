@@ -5,27 +5,28 @@ import Link from "next/link";
 import { useState } from "react";
 import { useParams } from "next/navigation";
 
+import { useAcademicYear } from "@/hooks/useAcademicYear";
 import { ListPagination } from "@/components/shared/ListPagination";
 import { PageWrapper } from "@/components/layout/PageWrapper";
 import { Card } from "@/components/ui/Card";
 import { TableSkeleton } from "@/components/ui/TableSkeleton";
-import { ACADEMIC_YEAR } from "@/lib/constants";
 import { api } from "@/lib/api";
 import { formatINR } from "@/lib/utils";
 import type { PaginatedResponse } from "@/types/pagination";
 import type { SchoolFeePayment } from "@/types/schoolFees";
 
 const HistoryPage = (): JSX.Element => {
+  const orgAcademicYear = useAcademicYear();
   const params = useParams<{ studentId: string }>();
   const [page, setPage] = useState(1);
 
   const historyQuery = useQuery({
-    queryKey: ["school-fee-history", params.studentId, { page, academicYear: ACADEMIC_YEAR }],
+    queryKey: ["school-fee-history", params.studentId, { page, academicYear: orgAcademicYear }],
     queryFn: async () =>
       (
         await api.get<PaginatedResponse<SchoolFeePayment>>(
           `/api/school-fees/history/${params.studentId}`,
-          { params: { academicYear: ACADEMIC_YEAR, page, limit: 20 } }
+          { params: { academicYear: orgAcademicYear, page, limit: 20 } }
         )
       ).data,
     placeholderData: keepPreviousData

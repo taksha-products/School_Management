@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
+import { useAcademicYear } from "@/hooks/useAcademicYear";
 import { StudentTransportModal } from "@/components/admin/StudentTransportModal";
 import { ListPagination } from "@/components/shared/ListPagination";
 import { PageWrapper } from "@/components/layout/PageWrapper";
@@ -17,7 +18,6 @@ import { Card } from "@/components/ui/Card";
 import { Modal } from "@/components/ui/Modal";
 import { TableSkeleton } from "@/components/ui/TableSkeleton";
 import { useToast } from "@/components/ui/Toast";
-import { ACADEMIC_YEAR } from "@/lib/constants";
 import { formatGradeDisplay, useOrgConfig } from "@/hooks/useOrgConfig";
 import { api } from "@/lib/api";
 import { downloadFromApi } from "@/lib/fileDownload";
@@ -45,9 +45,10 @@ const recentMonths = Array.from({ length: 6 }).map((_, i) => {
 });
 
 const StudentsPage = (): JSX.Element => {
+  const orgAcademicYear = useAcademicYear();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
-  const { gradeOptions, getSectionsForGrade } = useOrgConfig();
+  const { gradeOptions, getSectionsForGrade, hasAnySections } = useOrgConfig();
   const [open, setOpen] = useState(false);
   const [transportOpen, setTransportOpen] = useState(false);
   const [editing, setEditing] = useState<Student | null>(null);
@@ -55,6 +56,7 @@ const StudentsPage = (): JSX.Element => {
   const [transportStudent, setTransportStudent] = useState<Student | null>(null);
   const [search, setSearch] = useState("");
   const [gradeFilter, setGradeFilter] = useState("");
+  const [sectionFilter, setSectionFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("active");
   const [page, setPage] = useState(1);
   const [isExporting, setIsExporting] = useState(false);
@@ -65,10 +67,19 @@ const StudentsPage = (): JSX.Element => {
 
   const showBulkSelect = statusFilter === "active";
 
+  const sectionFilterOptions = useMemo(
+    () => (gradeFilter ? getSectionsForGrade(gradeFilter) : []),
+    [gradeFilter, getSectionsForGrade]
+  );
+
+  useEffect(() => {
+    setSectionFilter("");
+  }, [gradeFilter]);
+
   useEffect(() => {
     setPage(1);
     setSelectedIds([]);
-  }, [search, gradeFilter, statusFilter]);
+  }, [search, gradeFilter, sectionFilter, statusFilter]);
 
   useEffect(() => {
     const onDoc = (event: MouseEvent): void => {
@@ -82,7 +93,7 @@ const StudentsPage = (): JSX.Element => {
 
   const form = useForm<StudentForm>({
     resolver: zodResolver(studentSchema),
-    defaultValues: { status: "active", academicYear: "2025-26" }
+    defaultValues: { status: "active", academicYear: orgAcademicYear }
   });
 
   const gradesQuery = useQuery({
@@ -91,13 +102,14 @@ const StudentsPage = (): JSX.Element => {
   });
 
   const studentsQuery = useQuery({
-    queryKey: ["students", { page, search, grade: gradeFilter, status: statusFilter }],
+    queryKey: ["students", { page, search, grade: gradeFilter, section: sectionFilter, status: statusFilter }],
     queryFn: async () =>
       (
         await api.get<PaginatedResponse<Student>>("/api/students", {
           params: {
             search: search || undefined,
             grade: gradeFilter || undefined,
+            section: sectionFilter || undefined,
             status: statusFilter || undefined,
             withTransport: true,
             page,
@@ -163,12 +175,12 @@ const StudentsPage = (): JSX.Element => {
   );
 
   const feeStatusQuery = useQuery({
-    queryKey: ["students-fee-status", ACADEMIC_YEAR, visibleStudentIds],
+    queryKey: ["students-fee-status", orgAcademicYear, visibleStudentIds],
     enabled: rows.length > 0,
     queryFn: async () => {
       const res = await api.get<{ data: StudentFeeStatusMap }>("/api/school-fees/student-fee-status", {
         params: {
-          academicYear: ACADEMIC_YEAR,
+          academicYear: orgAcademicYear,
           studentIds: rows.map((student) => student._id).join(",")
         }
       });
@@ -225,6 +237,7 @@ const StudentsPage = (): JSX.Element => {
         `taksha_students_${new Date().toISOString().slice(0, 10)}.xlsx`,
         {
           grade: gradeFilter || undefined,
+          section: sectionFilter || undefined,
           status: statusFilter || undefined
         }
       );
@@ -270,7 +283,7 @@ const StudentsPage = (): JSX.Element => {
           <Button
             onClick={() => {
               setEditing(null);
-              form.reset({ status: "active", academicYear: "2025-26" });
+              form.reset({ status: "active", academicYear: orgAcademicYear });
               setOpen(true);
             }}
           >
@@ -280,12 +293,12 @@ const StudentsPage = (): JSX.Element => {
       }
     >
       <Card>
-        <div className="mb-3 grid gap-2 md:grid-cols-3">
+        <div className={`mb-3 grid gap-2 ${hasAnySections ? "md:grid-cols-4" : "md:grid-cols-3"}`}>
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search student name"
-            className="rounded border border-slate-200 px-3 py-2 md:col-span-1"
+            className="rounded border border-slate-200 px-3 py-2"
           />
           <select
             value={gradeFilter}
@@ -299,6 +312,27 @@ const StudentsPage = (): JSX.Element => {
               </option>
             ))}
           </select>
+          {hasAnySections && (
+            <select
+              value={sectionFilter}
+              onChange={(e) => setSectionFilter(e.target.value)}
+              disabled={!gradeFilter || sectionFilterOptions.length === 0}
+              className="rounded border border-slate-200 px-3 py-2 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-400"
+            >
+              <option value="">
+                {!gradeFilter
+                  ? "Select grade first"
+                  : sectionFilterOptions.length === 0
+                    ? "No sections"
+                    : "All sections"}
+              </option>
+              {sectionFilterOptions.map((section) => (
+                <option key={section} value={section}>
+                  Section {section}
+                </option>
+              ))}
+            </select>
+          )}
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
@@ -388,7 +422,7 @@ const StudentsPage = (): JSX.Element => {
                         }
                         return (
                           <Link
-                            href={`/admin/fees/collect?studentId=${student._id}`}
+                            href={`/admin/fees/collect/${student._id}`}
                             onClick={(e) => e.stopPropagation()}
                             className="text-xs font-medium text-rose-600 hover:underline"
                           >

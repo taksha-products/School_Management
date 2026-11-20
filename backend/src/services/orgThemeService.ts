@@ -8,6 +8,12 @@ export interface OrgThemeResponse {
   orgName: string;
 }
 
+export interface OrgReceiptBranding extends OrgThemeResponse {
+  address?: string | null;
+  phone?: string | null;
+  email?: string | null;
+}
+
 const THEME_CACHE_SUFFIX = "theme";
 const THEME_CACHE_TTL_SECONDS = 300;
 
@@ -38,6 +44,27 @@ export const getOrgTheme = async (organizationId: string): Promise<OrgThemeRespo
 
 export const invalidateOrgThemeCache = async (organizationId: string): Promise<void> => {
   await deleteCached(orgCacheKey(organizationId, THEME_CACHE_SUFFIX));
+};
+
+export const getOrgReceiptBranding = async (
+  organizationId: string
+): Promise<OrgReceiptBranding | null> => {
+  const org = await Organization.findById(organizationId).select(
+    "name logoUrl brandColor displayName address phone email"
+  );
+  if (!org) {
+    return null;
+  }
+
+  return {
+    logoUrl: org.logoUrl ?? null,
+    brandColor: org.brandColor ?? null,
+    displayName: org.displayName ?? null,
+    orgName: org.name,
+    address: org.address ?? null,
+    phone: org.phone ?? null,
+    email: org.email ?? null
+  };
 };
 
 export const getOrgBrandingLabel = async (organizationId: string): Promise<string> => {

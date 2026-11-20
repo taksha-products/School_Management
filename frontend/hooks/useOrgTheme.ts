@@ -25,11 +25,10 @@ export const useOrgTheme = (): {
   const orgId = getUser()?.organizationId ?? null;
 
   const query = useQuery({
-    queryKey: ["org-theme", orgId],
+    queryKey: ["org-theme", orgId ?? "session"],
     queryFn: async () =>
       (await api.get<{ data: OrgTheme }>("/api/org/theme")).data.data,
-    staleTime: THEME_STALE_MS,
-    enabled: !!orgId
+    staleTime: THEME_STALE_MS
   });
 
   const theme = query.data ?? emptyTheme;
