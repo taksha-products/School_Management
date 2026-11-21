@@ -8,7 +8,7 @@ Everything here was checked by building the real Docker images and running them 
 
 | Part | How it runs | Notes |
 |---|---|---|
-| Backend (Express + Socket.IO) | `backend/Dockerfile`, or Render (`backend/render.yaml`) | Port 5000, health check `GET /api/health` |
+| Backend (Express + Socket.IO) | `backend/Dockerfile` | Port 5000, health check `GET /api/health` |
 | Frontend (Next.js) | `frontend/Dockerfile` | Port 3000 |
 | MongoDB | Managed (Atlas) | Required |
 | Redis | Managed or the compose service | Optional, but needed for live map updates and caching |
@@ -44,10 +44,8 @@ docker build ./frontend \
 
 ## Staging on the Oracle VM (docker-compose.dev-nginx.yml)
 
-- nginx serves the site, the API and `/socket.io/` on **one address**, so the login cookie reaches the live socket. The frontend image is built without `NEXT_PUBLIC_BACKEND_URL`, and the browser then uses its own origin (no build argument needed in CI).
-- The compose file includes Traccar (amd64 and arm64). Add `TRACCAR_WEBHOOK_SECRET` and `TRACCAR_TOKEN` to the server `.env`. Until then GPS is inactive and everything else works.
-- Traccar's web UI is bound to `127.0.0.1:8082`: reach it with `ssh -L 8082:127.0.0.1:8082 user@vm`, create the admin account, generate a token (account menu, Preferences, Token), put it in `.env`, and restart the backend.
-- Open the tracker port(s) in both the cloud security list and the VM firewall: 5055 for the Traccar Client phone app, plus your hardware's port.
+- nginx serves the site, the API and `/socket.io/` on **one address**. The frontend image is built without `NEXT_PUBLIC_BACKEND_URL`, so the browser uses its own origin.
+- **GPS tracking is not part of the staging deployment.** The staging compose file has no Traccar service. The backend starts normally without Traccar and GPS stays inactive (the `gpsTracking` feature flag is off per school). To run GPS locally use `docker-compose.yml`; to add it to a server later, add a Traccar service and set `TRACCAR_URL`, `TRACCAR_TOKEN` and `TRACCAR_WEBHOOK_SECRET` (see the variables above).
 
 ## Requirements and behaviour to know
 
