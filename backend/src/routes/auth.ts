@@ -8,8 +8,10 @@ import { blockSuperAdmin2FADisable } from "../middleware/require2FA";
 import { validate } from "../middleware/validate";
 import { Organization } from "../models/Organization";
 import { getOrgBrandingLabel } from "../services/orgThemeService";
+import { sendParentLoginOtp } from "../services/sms";
 import { getRefreshTokenExpiry, RefreshToken } from "../models/RefreshToken";
 import { User, type IUser } from "../models/User";
+import { isMobileApiClient } from "../utils/apiClient";
 import { asyncHandler } from "../utils/asyncHandler";
 import { clearAuthCookies, clearPreAuthCookie, setAuthCookies, setPreAuthCookie } from "../utils/authCookies";
 import {
@@ -19,6 +21,17 @@ import {
   generateRefreshToken,
   verifyPreAuthToken
 } from "../utils/jwt";
+import {
+  canRequestOtp,
+  clearParentOtp,
+  consumeSchoolSelectionToken,
+  createSchoolSelectionToken,
+  generateOtpCode,
+  OTP_CONFIG,
+  storeParentOtp,
+  verifyStoredParentOtp
+} from "../utils/otpRedis";
+import { normalizeIndianMobile } from "../utils/phone";
 import { hashToken } from "../utils/tokenHash";
 import {
   decryptSecretFromStorage,
@@ -38,7 +51,14 @@ import {
   setPendingTotpSecret
 } from "../utils/twoFactorRedis";
 import { TWO_FACTOR_VERIFICATION_MAX_AGE_MS } from "../constants/twoFactor";
-import { loginValidation } from "../validators/auth";
+import {
+  loginValidation,
+  otpRequestValidation,
+  otpSelectSchoolValidation,
+  otpVerifyValidation
+} from "../validators/auth";
+import { Types } from "mongoose";
+import { Student } from "../models/Student";
 
 const authRouter = Router();
 
@@ -58,25 +78,66 @@ const refreshLimiter = rateLimit({
   message: { success: false, message: "Too many refresh attempts." }
 });
 
+const otpRequestLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: "Too many OTP requests. Try again later." }
+});
+
+const otpVerifyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: "Too many OTP verification attempts." }
+});
+
 interface PublicUser {
   id: string;
   name: string;
   email: string;
+  phone?: string;
   role: IUser["role"];
   organizationId: string | null;
   permissions?: IUser["staffPermissions"];
   parentStudentIds?: string[];
 }
 
+interface IssuedSession {
+  user: PublicUser;
+  accessToken?: string;
+  refreshToken?: string;
+}
+
 const toPublicUser = (user: IUser): PublicUser => ({
   id: user._id.toString(),
   name: user.name,
   email: user.email,
+  phone: user.phone,
   role: user.role,
   organizationId: user.organizationId ? user.organizationId.toString() : null,
   permissions: user.staffPermissions,
   parentStudentIds: user.parentStudentIds?.map((id) => id.toString())
 });
+
+/**
+ * Reads the refresh token from httpOnly cookie (web) or JSON body (mobile).
+ */
+const extractRefreshTokenRaw = (req: AuthenticatedRequest): string | undefined => {
+  const cookieToken = req.cookies?.refresh_token as string | undefined;
+  if (cookieToken) {
+    return cookieToken;
+  }
+
+  if (isMobileApiClient(req)) {
+    const bodyToken = (req.body as { refreshToken?: unknown } | undefined)?.refreshToken;
+    return typeof bodyToken === "string" ? bodyToken : undefined;
+  }
+
+  return undefined;
+};
 
 const getClientIp = (req: AuthenticatedRequest): string => {
   const forwarded = req.headers["x-forwarded-for"];
@@ -105,12 +166,17 @@ const persistRefreshToken = async (
   });
 };
 
+/**
+ * Issues access + refresh tokens.
+ * Web: sets httpOnly cookies.
+ * Mobile (`x-api-client: mobile`): returns tokens in the response body for Bearer auth.
+ */
 const issueSession = async (
   user: IUser,
   req: AuthenticatedRequest,
   res: Parameters<typeof setAuthCookies>[0],
   updateTwoFactorVerified = false
-): Promise<PublicUser> => {
+): Promise<IssuedSession> => {
   assertRefreshSecretConfigured();
 
   if (updateTwoFactorVerified) {
@@ -121,10 +187,34 @@ const issueSession = async (
   const accessToken = generateAccessToken(user);
   const refresh = generateRefreshToken();
   await persistRefreshToken(user, refresh.hashed, refresh.family, req);
-  setAuthCookies(res, accessToken, refresh.raw);
 
-  return toPublicUser(user);
+  const publicUser = toPublicUser(user);
+
+  if (isMobileApiClient(req)) {
+    return {
+      user: publicUser,
+      accessToken,
+      refreshToken: refresh.raw
+    };
+  }
+
+  setAuthCookies(res, accessToken, refresh.raw);
+  return { user: publicUser };
 };
+
+const sessionResponseBody = (session: IssuedSession, extra: Record<string, unknown> = {}) => ({
+  success: true,
+  user: session.user,
+  ...(session.accessToken && session.refreshToken
+    ? {
+        accessToken: session.accessToken,
+        refreshToken: session.refreshToken,
+        tokenType: "Bearer" as const,
+        expiresIn: Number(process.env.ACCESS_TOKEN_MAX_AGE_SECONDS ?? 8 * 60 * 60)
+      }
+    : {}),
+  ...extra
+});
 
 const getOrganizationName = async (user: IUser): Promise<string> => {
   if (!user.organizationId) {
@@ -171,6 +261,16 @@ authRouter.post(
       return;
     }
 
+    // Parents authenticate only via mobile OTP — never email/password.
+    if (user.role === "parent") {
+      res.status(403).json({
+        success: false,
+        message: "Parents sign in with mobile number OTP only",
+        code: "PARENT_OTP_REQUIRED"
+      });
+      return;
+    }
+
     if (user.organizationId) {
       const organization = await Organization.findById(user.organizationId);
       if (!organization?.isActive) {
@@ -194,13 +294,11 @@ authRouter.post(
         return;
       }
 
-      const publicUser = await issueSession(user, req, res);
+      const session = await issueSession(user, req, res);
       const requires2FASetup = user.role === "superAdmin" && !user.twoFactorEnabled;
-      res.json({
-        success: true,
-        user: publicUser,
-        ...(requires2FASetup ? { requires2FASetup: true } : {})
-      });
+      res.json(
+        sessionResponseBody(session, requires2FASetup ? { requires2FASetup: true } : {})
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : "Authentication failed";
       res.status(500).json({
@@ -215,10 +313,14 @@ authRouter.post(
   "/refresh",
   refreshLimiter,
   asyncHandler(async (req, res) => {
-    const rawRefresh = req.cookies?.refresh_token as string | undefined;
+    const authReq = req as AuthenticatedRequest;
+    const rawRefresh = extractRefreshTokenRaw(authReq);
+    const mobileClient = isMobileApiClient(authReq);
 
     if (!rawRefresh) {
-      clearAuthCookies(res);
+      if (!mobileClient) {
+        clearAuthCookies(res);
+      }
       res.status(401).json({
         success: false,
         error: "Invalid refresh token",
@@ -231,7 +333,9 @@ authRouter.post(
     const existing = await RefreshToken.findOne({ token: hashed });
 
     if (!existing || existing.expiresAt.getTime() <= Date.now()) {
-      clearAuthCookies(res);
+      if (!mobileClient) {
+        clearAuthCookies(res);
+      }
       res.status(401).json({
         success: false,
         error: "Invalid refresh token",
@@ -245,10 +349,12 @@ authRouter.post(
         await RefreshToken.revokeFamily(existing.family);
         logSuspiciousEvent("token_reuse_detected", {
           userId: existing.userId.toString(),
-          ipAddress: getClientIp(req),
+          ipAddress: getClientIp(authReq),
           family: existing.family
         });
-        clearAuthCookies(res);
+        if (!mobileClient) {
+          clearAuthCookies(res);
+        }
         res.status(401).json({
           success: false,
           error: "Token reuse detected",
@@ -257,7 +363,9 @@ authRouter.post(
         return;
       }
 
-      clearAuthCookies(res);
+      if (!mobileClient) {
+        clearAuthCookies(res);
+      }
       res.status(401).json({
         success: false,
         error: "Invalid refresh token",
@@ -268,7 +376,9 @@ authRouter.post(
 
     const user = await User.findById(existing.userId);
     if (!user || !user.isActive) {
-      clearAuthCookies(res);
+      if (!mobileClient) {
+        clearAuthCookies(res);
+      }
       res.status(401).json({
         success: false,
         error: "Invalid refresh token",
@@ -280,7 +390,9 @@ authRouter.post(
     if (user.organizationId) {
       const organization = await Organization.findById(user.organizationId);
       if (!organization?.isActive) {
-        clearAuthCookies(res);
+        if (!mobileClient) {
+          clearAuthCookies(res);
+        }
         res.status(401).json({
           success: false,
           error: "Invalid refresh token",
@@ -313,10 +425,12 @@ authRouter.post(
         await RefreshToken.revokeFamily(raceToken.family);
         logSuspiciousEvent("token_reuse_detected", {
           userId: raceToken.userId.toString(),
-          ipAddress: getClientIp(req),
+          ipAddress: getClientIp(authReq),
           family: raceToken.family
         });
-        clearAuthCookies(res);
+        if (!mobileClient) {
+          clearAuthCookies(res);
+        }
         res.status(401).json({
           success: false,
           error: "Token reuse detected",
@@ -325,7 +439,9 @@ authRouter.post(
         return;
       }
 
-      clearAuthCookies(res);
+      if (!mobileClient) {
+        clearAuthCookies(res);
+      }
       res.status(401).json({
         success: false,
         error: "Invalid refresh token",
@@ -342,21 +458,28 @@ authRouter.post(
       expiresAt: getRefreshTokenExpiry(),
       isRevoked: false,
       replacedByToken: null,
-      ipAddress: getClientIp(req),
+      ipAddress: getClientIp(authReq),
       userAgent: req.headers["user-agent"] ?? ""
     });
 
-    setAuthCookies(res, accessToken, rotated.raw);
+    const publicUser = toPublicUser(user);
 
+    if (mobileClient) {
+      res.json({
+        success: true,
+        user: publicUser,
+        accessToken,
+        refreshToken: rotated.raw,
+        tokenType: "Bearer",
+        expiresIn: Number(process.env.ACCESS_TOKEN_MAX_AGE_SECONDS ?? 8 * 60 * 60)
+      });
+      return;
+    }
+
+    setAuthCookies(res, accessToken, rotated.raw);
     res.json({
       success: true,
-      user: {
-        id: user._id.toString(),
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        organizationId: user.organizationId ? user.organizationId.toString() : null
-      }
+      user: publicUser
     });
   })
 );
@@ -364,7 +487,8 @@ authRouter.post(
 authRouter.post(
   "/logout",
   asyncHandler(async (req, res) => {
-    const rawRefresh = req.cookies?.refresh_token as string | undefined;
+    const authReq = req as AuthenticatedRequest;
+    const rawRefresh = extractRefreshTokenRaw(authReq);
 
     if (rawRefresh) {
       const hashed = hashToken(rawRefresh);
@@ -374,7 +498,9 @@ authRouter.post(
       );
     }
 
-    clearAuthCookies(res);
+    if (!isMobileApiClient(authReq)) {
+      clearAuthCookies(res);
+    }
     res.status(200).json({ success: true });
   })
 );
@@ -395,7 +521,9 @@ authRouter.post(
       { $set: { isRevoked: true } }
     );
 
-    clearAuthCookies(res);
+    if (!isMobileApiClient(authReq)) {
+      clearAuthCookies(res);
+    }
     res.status(200).json({ success: true });
   })
 );
@@ -418,6 +546,7 @@ const meHandler = asyncHandler(async (req, res) => {
     user: {
       id: authReq.user.userId,
       name: authReq.user.name,
+      phone: authReq.user.phone,
       role: authReq.user.role,
       organizationId: authReq.user.organizationId,
       permissions: authReq.user.staffPermissions,
@@ -518,8 +647,373 @@ authRouter.post(
     clearPreAuthCookie(res);
 
     try {
-      const publicUser = await issueSession(user, req, res, true);
-      res.json({ success: true, user: publicUser });
+      const session = await issueSession(user, req, res, true);
+      res.json(sessionResponseBody(session));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Authentication failed";
+      res.status(500).json({ success: false, message });
+    }
+  })
+);
+
+const activeOrgFilter = {
+  isActive: true,
+  $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }]
+};
+
+interface ParentSchoolOption {
+  orgCode: string;
+  orgName: string;
+  organizationId: string;
+  parentUserId: string;
+  children: Array<{ id: string; name: string; grade: string }>;
+}
+
+const buildParentSchoolOptions = async (
+  parentUsers: Array<{
+    _id: Types.ObjectId;
+    organizationId: Types.ObjectId | null;
+    parentStudentIds?: Types.ObjectId[];
+  }>
+): Promise<ParentSchoolOption[]> => {
+  const orgIds = parentUsers
+    .map((u) => u.organizationId)
+    .filter((id): id is Types.ObjectId => !!id);
+
+  const orgs = await Organization.find({
+    _id: { $in: orgIds },
+    ...activeOrgFilter
+  }).select("_id name code");
+
+  const orgById = new Map(orgs.map((o) => [o._id.toString(), o]));
+  const allChildIds = parentUsers.flatMap((u) => u.parentStudentIds ?? []);
+  const children = allChildIds.length
+    ? await Student.find({ _id: { $in: allChildIds }, status: "active" }).select(
+        "name grade organizationId"
+      )
+    : [];
+
+  const options: ParentSchoolOption[] = [];
+  for (const parent of parentUsers) {
+    if (!parent.organizationId) {
+      continue;
+    }
+    const org = orgById.get(parent.organizationId.toString());
+    if (!org) {
+      continue;
+    }
+    const childIds = new Set((parent.parentStudentIds ?? []).map((id) => id.toString()));
+    options.push({
+      orgCode: org.code,
+      orgName: org.name,
+      organizationId: org._id.toString(),
+      parentUserId: parent._id.toString(),
+      children: children
+        .filter(
+          (c) =>
+            childIds.has(c._id.toString()) &&
+            c.organizationId.toString() === org._id.toString()
+        )
+        .map((c) => ({
+          id: c._id.toString(),
+          name: c.name,
+          grade: c.grade
+        }))
+    });
+  }
+  return options;
+};
+
+/**
+ * Parent phone OTP — step 1: request SMS by phone.
+ * Optional orgCode narrows to one school; otherwise all matching parent accounts are candidates.
+ */
+authRouter.post(
+  "/otp/request",
+  otpRequestLimiter,
+  otpRequestValidation,
+  validate,
+  asyncHandler(async (req, res) => {
+    const { phone: rawPhone, orgCode } = req.body as { phone: string; orgCode?: string };
+    const phone = normalizeIndianMobile(rawPhone);
+    if (!phone) {
+      res.status(400).json({
+        success: false,
+        message: "Enter a valid 10-digit Indian mobile number",
+        code: "PHONE_INVALID"
+      });
+      return;
+    }
+
+    const genericSuccess = {
+      success: true,
+      message: "If this number is registered, an OTP has been sent",
+      expiresInSeconds: OTP_CONFIG.ttlSeconds,
+      resendCooldownSeconds: OTP_CONFIG.resendCooldownSeconds
+    };
+
+    const gate = await canRequestOtp(phone);
+    if (!gate.allowed) {
+      res.status(429).json({
+        success: false,
+        message: gate.reason ?? "Too many OTP requests",
+        code: "OTP_RATE_LIMITED",
+        retryAfterSeconds: gate.retryAfterSeconds
+      });
+      return;
+    }
+
+    const parentQuery: Record<string, unknown> = {
+      phone,
+      role: "parent",
+      isActive: true,
+      organizationId: { $ne: null }
+    };
+
+    if (orgCode) {
+      const organization = await Organization.findOne({
+        code: orgCode.trim().toLowerCase(),
+        ...activeOrgFilter
+      }).select("_id");
+      if (!organization) {
+        res.json(genericSuccess);
+        return;
+      }
+      parentQuery.organizationId = organization._id;
+    }
+
+    const parents = await User.find(parentQuery).select("_id organizationId");
+    if (parents.length === 0) {
+      res.json(genericSuccess);
+      return;
+    }
+
+    // Keep only parents whose org is still active
+    const activeOrgIds = new Set(
+      (
+        await Organization.find({
+          _id: { $in: parents.map((p) => p.organizationId).filter(Boolean) },
+          ...activeOrgFilter
+        }).select("_id")
+      ).map((o) => o._id.toString())
+    );
+    const eligible = parents.filter(
+      (p) => p.organizationId && activeOrgIds.has(p.organizationId.toString())
+    );
+    if (eligible.length === 0) {
+      res.json(genericSuccess);
+      return;
+    }
+
+    try {
+      const otp = generateOtpCode();
+      await storeParentOtp(
+        phone,
+        otp,
+        eligible.map((p) => p._id.toString())
+      );
+
+      const smsResult = await sendParentLoginOtp(phone, otp);
+      if (!smsResult.success) {
+        await clearParentOtp(phone);
+        res.status(503).json({
+          success: false,
+          message: "Unable to send OTP right now. Please try again.",
+          code: "SMS_FAILED"
+        });
+        return;
+      }
+
+      res.json({
+        ...genericSuccess,
+        ...(process.env.NODE_ENV !== "production" && process.env.OTP_DEBUG === "true"
+          ? { debugOtp: otp }
+          : {})
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to send OTP";
+      res.status(503).json({
+        success: false,
+        message,
+        code: "OTP_UNAVAILABLE"
+      });
+    }
+  })
+);
+
+/**
+ * Parent phone OTP — step 2: verify code.
+ * 1 school → issue session.
+ * 2+ schools → requiresSchoolSelection + selectionToken + schools (popup on app).
+ */
+authRouter.post(
+  "/otp/verify",
+  otpVerifyLimiter,
+  otpVerifyValidation,
+  validate,
+  asyncHandler(async (req, res) => {
+    const { phone: rawPhone, otp, orgCode } = req.body as {
+      phone: string;
+      otp: string;
+      orgCode?: string;
+    };
+    const phone = normalizeIndianMobile(rawPhone);
+
+    if (!phone) {
+      res.status(400).json({
+        success: false,
+        message: "Enter a valid 10-digit Indian mobile number",
+        code: "PHONE_INVALID"
+      });
+      return;
+    }
+
+    const verified = await verifyStoredParentOtp(phone, otp.trim());
+    if (!verified.ok) {
+      res.status(401).json({
+        success: false,
+        message: verified.message,
+        code: verified.code
+      });
+      return;
+    }
+
+    let parentUsers = await User.find({
+      _id: { $in: verified.payload.parentUserIds },
+      phone,
+      role: "parent",
+      isActive: true
+    }).select("_id organizationId parentStudentIds name phone");
+
+    if (orgCode) {
+      const organization = await Organization.findOne({
+        code: orgCode.trim().toLowerCase(),
+        ...activeOrgFilter
+      }).select("_id");
+      if (!organization) {
+        res.status(401).json({
+          success: false,
+          message: "Invalid OTP",
+          code: "OTP_INVALID"
+        });
+        return;
+      }
+      parentUsers = parentUsers.filter(
+        (u) => u.organizationId?.toString() === organization._id.toString()
+      );
+    }
+
+    const schools = await buildParentSchoolOptions(parentUsers);
+    if (schools.length === 0) {
+      await clearParentOtp(phone);
+      res.status(401).json({
+        success: false,
+        message: "Invalid OTP",
+        code: "OTP_INVALID"
+      });
+      return;
+    }
+
+    await clearParentOtp(phone);
+
+    if (schools.length === 1) {
+      const user = await User.findById(schools[0].parentUserId);
+      if (!user) {
+        res.status(401).json({
+          success: false,
+          message: "Invalid OTP",
+          code: "OTP_INVALID"
+        });
+        return;
+      }
+      try {
+        const session = await issueSession(user, req as AuthenticatedRequest, res);
+        res.json(sessionResponseBody(session));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Authentication failed";
+        res.status(500).json({ success: false, message });
+      }
+      return;
+    }
+
+    try {
+      const selectionToken = await createSchoolSelectionToken(
+        phone,
+        schools.map((s) => s.parentUserId)
+      );
+      res.json({
+        success: true,
+        requiresSchoolSelection: true,
+        selectionToken,
+        schools,
+        expiresInSeconds: OTP_CONFIG.schoolSelectTtlSeconds,
+        message: "Multiple schools found. Select a school to continue."
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Authentication failed";
+      res.status(503).json({ success: false, message, code: "OTP_UNAVAILABLE" });
+    }
+  })
+);
+
+/**
+ * Parent phone OTP — step 3: after multi-school popup, select org and issue session.
+ */
+authRouter.post(
+  "/otp/select-school",
+  otpVerifyLimiter,
+  otpSelectSchoolValidation,
+  validate,
+  asyncHandler(async (req, res) => {
+    const { selectionToken, orgCode } = req.body as {
+      selectionToken: string;
+      orgCode: string;
+    };
+
+    const selection = await consumeSchoolSelectionToken(selectionToken);
+    if (!selection) {
+      res.status(401).json({
+        success: false,
+        message: "School selection expired. Please verify OTP again.",
+        code: "SELECTION_EXPIRED"
+      });
+      return;
+    }
+
+    const organization = await Organization.findOne({
+      code: orgCode.trim().toLowerCase(),
+      ...activeOrgFilter
+    }).select("_id");
+
+    if (!organization) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid school selection",
+        code: "ORG_INVALID"
+      });
+      return;
+    }
+
+    const user = await User.findOne({
+      _id: { $in: selection.parentUserIds },
+      phone: selection.phone,
+      role: "parent",
+      organizationId: organization._id,
+      isActive: true
+    });
+
+    if (!user) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid school selection",
+        code: "ORG_INVALID"
+      });
+      return;
+    }
+
+    try {
+      const session = await issueSession(user, req as AuthenticatedRequest, res);
+      res.json(sessionResponseBody(session));
     } catch (error) {
       const message = error instanceof Error ? error.message : "Authentication failed";
       res.status(500).json({ success: false, message });

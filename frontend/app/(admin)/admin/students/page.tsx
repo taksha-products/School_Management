@@ -9,6 +9,7 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 
 import { useAcademicYear } from "@/hooks/useAcademicYear";
+import { ParentAccountCreatedModal } from "@/components/admin/ParentAccountCreatedModal";
 import { StudentTransportModal } from "@/components/admin/StudentTransportModal";
 import { ListPagination } from "@/components/shared/ListPagination";
 import { PageWrapper } from "@/components/layout/PageWrapper";
@@ -23,15 +24,17 @@ import { api } from "@/lib/api";
 import { downloadFromApi } from "@/lib/fileDownload";
 import { formatINR } from "@/lib/utils";
 import type { PaginatedResponse } from "@/types/pagination";
-import type { FeePayment, Student } from "@/types";
+import type { FeePayment, ParentAccountProvision, Student } from "@/types";
 import type { StudentFeeStatusMap } from "@/types/schoolFees";
 
 const studentSchema = z.object({
   name: z.string().min(2),
   grade: z.string().min(1),
   section: z.string().optional(),
-  parentName: z.string().min(2),
-  parentPhone: z.string().min(10),
+  parentName: z.string().min(2, "Parent name is required"),
+  parentPhone: z
+    .string()
+    .regex(/^[6-9]\d{9}$/, "Enter a valid 10-digit Indian mobile number"),
   address: z.string().optional(),
   status: z.enum(["active", "inactive"]),
   academicYear: z.string().min(4)
@@ -63,6 +66,7 @@ const StudentsPage = (): JSX.Element => {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [deactivateConfirmOpen, setDeactivateConfirmOpen] = useState(false);
   const [moreActionsOpen, setMoreActionsOpen] = useState(false);
+  const [parentAccountInfo, setParentAccountInfo] = useState<ParentAccountProvision | null>(null);
   const moreActionsRef = useRef<HTMLDivElement>(null);
 
   const showBulkSelect = statusFilter === "active";
@@ -153,16 +157,30 @@ const StudentsPage = (): JSX.Element => {
           selectedGradeSections.length > 0 ? payload.section || undefined : undefined
       };
       if (editing) {
-        return api.put(`/api/students/${editing._id}`, body);
+        return api.put<{ data: Student; parentAccount?: ParentAccountProvision; message?: string }>(
+          `/api/students/${editing._id}`,
+          body
+        );
       }
-      return api.post("/api/students", body);
+      return api.post<{ data: Student; parentAccount?: ParentAccountProvision; message?: string }>(
+        "/api/students",
+        body
+      );
     },
-    onSuccess: () => {
+    onSuccess: (response) => {
       queryClient.invalidateQueries({ queryKey: ["students"] });
       setOpen(false);
       setEditing(null);
       form.reset();
-      showToast("success", "Student saved");
+      const parentAccount = response.data.parentAccount;
+      if (parentAccount?.created && parentAccount.temporaryPassword) {
+        setParentAccountInfo(parentAccount);
+        showToast("success", "Student saved — parent account created");
+      } else if (parentAccount && !parentAccount.created) {
+        showToast("success", "Student saved and linked to existing parent");
+      } else {
+        showToast("success", "Student saved");
+      }
     },
     onError: () => showToast("error", "Failed to save student")
   });
@@ -559,16 +577,25 @@ const StudentsPage = (): JSX.Element => {
               ))}
             </select>
           )}
-          <input
-            {...form.register("parentName")}
-            placeholder="Parent Name"
-            className="rounded border px-3 py-2"
-          />
-          <input
-            {...form.register("parentPhone")}
-            placeholder="Parent Phone"
-            className="rounded border px-3 py-2"
-          />
+          <div>
+            <input
+              {...form.register("parentName")}
+              placeholder="Parent Name *"
+              className="w-full rounded border px-3 py-2"
+            />
+            <p className="mt-1 text-xs text-rose-500">{form.formState.errors.parentName?.message}</p>
+          </div>
+          <div>
+            <input
+              {...form.register("parentPhone")}
+              placeholder="Parent Phone * (10-digit)"
+              className="w-full rounded border px-3 py-2"
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              Creates or links the parent login for mobile OTP / web access.
+            </p>
+            <p className="mt-1 text-xs text-rose-500">{form.formState.errors.parentPhone?.message}</p>
+          </div>
           <textarea {...form.register("address")} placeholder="Address" className="rounded border px-3 py-2" />
           <input
             {...form.register("academicYear")}
@@ -590,6 +617,11 @@ const StudentsPage = (): JSX.Element => {
           setTransportOpen(false);
           setTransportStudent(null);
         }}
+      />
+
+      <ParentAccountCreatedModal
+        info={parentAccountInfo}
+        onClose={() => setParentAccountInfo(null)}
       />
     </PageWrapper>
   );

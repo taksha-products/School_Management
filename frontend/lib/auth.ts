@@ -118,8 +118,12 @@ export const applyLoginUser = (user: ApiUserPayload): AuthUser => {
 /**
  * Revokes the server session and redirects to the login page.
  */
+export const getLoginPathForRole = (role?: UserRole | null): string =>
+  role === "parent" ? "/parent/login" : "/login";
+
 export const logout = async (): Promise<void> => {
   const { api } = await import("./api");
+  const role = currentUser?.role;
 
   try {
     await api.post("/api/auth/logout");
@@ -128,7 +132,7 @@ export const logout = async (): Promise<void> => {
   } finally {
     clearUser();
     if (typeof window !== "undefined") {
-      window.location.href = "/login";
+      window.location.href = getLoginPathForRole(role);
     }
   }
 };

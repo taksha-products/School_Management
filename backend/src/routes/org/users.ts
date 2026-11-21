@@ -7,9 +7,11 @@ import { orgScope } from "../../middleware/orgScope";
 import { isOrgAdmin } from "../../middleware/roleCheck";
 import { Student } from "../../models/Student";
 import { User, type IUser } from "../../models/User";
+import { syncParentDetailsToLinkedStudents } from "../../services/parentProvisioning";
 import { asyncHandler } from "../../utils/asyncHandler";
 import { getScopedOrganizationId } from "../../utils/orgFilter";
 import { paginate, parsePaginationQuery } from "../../utils/paginate";
+import { normalizeIndianMobile } from "../../utils/phone";
 
 const orgUsersRouter = Router();
 
@@ -80,6 +82,7 @@ orgUsersRouter.get(
         _id: p._id,
         name: p.name,
         email: p.email,
+        phone: p.phone,
         isActive: p.isActive,
         students: p.parentStudentIds
       })),
@@ -95,10 +98,11 @@ orgUsersRouter.post(
     const authReq = req as AuthenticatedRequest;
     const orgId = getScopedOrganizationId(authReq, res)!;
 
-    const { name, email, password, role, staffPermissions, parentStudentIds } = req.body as {
+    const { name, email, password, phone, role, staffPermissions, parentStudentIds } = req.body as {
       name?: string;
       email?: string;
       password?: string;
+      phone?: string;
       role?: "staff" | "parent";
       staffPermissions?: IUser["staffPermissions"];
       parentStudentIds?: string[];
@@ -122,6 +126,41 @@ orgUsersRouter.post(
       return;
     }
 
+    let normalizedPhone: string | undefined;
+    if (role === "parent") {
+      if (!phone) {
+        res.status(400).json({
+          success: false,
+          data: null,
+          message: "phone is required for parent accounts (mobile OTP login)"
+        });
+        return;
+      }
+      const parsed = normalizeIndianMobile(phone);
+      if (!parsed) {
+        res.status(400).json({
+          success: false,
+          data: null,
+          message: "Enter a valid 10-digit Indian mobile number"
+        });
+        return;
+      }
+      normalizedPhone = parsed;
+
+      const phoneTaken = await User.findOne({
+        phone: normalizedPhone,
+        organizationId: new Types.ObjectId(orgId)
+      }).select("_id");
+      if (phoneTaken) {
+        res.status(400).json({
+          success: false,
+          data: null,
+          message: "A user with this phone number already exists in this organization"
+        });
+        return;
+      }
+    }
+
     if (role === "parent" && parentStudentIds?.length) {
       const count = await Student.countDocuments({
         _id: { $in: parentStudentIds.map((id) => new Types.ObjectId(id)) },
@@ -140,6 +179,7 @@ orgUsersRouter.post(
     const user = await User.create({
       name,
       email: email.toLowerCase(),
+      phone: normalizedPhone,
       passwordHash: await bcrypt.hash(password, 10),
       role,
       organizationId: new Types.ObjectId(orgId),
@@ -173,6 +213,33 @@ orgUsersRouter.put(
       delete updates.password;
     }
 
+    if (typeof updates.phone === "string") {
+      const parsed = normalizeIndianMobile(updates.phone);
+      if (!parsed) {
+        res.status(400).json({
+          success: false,
+          data: null,
+          message: "Enter a valid 10-digit Indian mobile number"
+        });
+        return;
+      }
+      const orgId = getScopedOrganizationId(authReq, res)!;
+      const phoneTaken = await User.findOne({
+        phone: parsed,
+        organizationId: new Types.ObjectId(orgId),
+        _id: { $ne: req.params.id }
+      }).select("_id");
+      if (phoneTaken) {
+        res.status(400).json({
+          success: false,
+          data: null,
+          message: "A user with this phone number already exists in this organization"
+        });
+        return;
+      }
+      updates.phone = parsed;
+    }
+
     const user = await User.findOneAndUpdate(
       { _id: req.params.id, ...orgFilterForUser(authReq, res) },
       updates,
@@ -188,10 +255,23 @@ orgUsersRouter.put(
       return;
     }
 
+    let studentsSynced = 0;
+    if (user.role === "parent" && (updates.name || updates.phone)) {
+      studentsSynced = await syncParentDetailsToLinkedStudents({
+        parentUserId: user._id,
+        parentName: typeof updates.name === "string" ? updates.name : user.name,
+        parentPhone: typeof updates.phone === "string" ? String(updates.phone) : user.phone
+      });
+    }
+
     res.json({
       success: true,
       data: sanitizeUser(user),
-      message: "User updated successfully"
+      studentsSynced,
+      message:
+        user.role === "parent" && studentsSynced > 0
+          ? `Parent updated; ${studentsSynced} linked student record(s) synced`
+          : "User updated successfully"
     });
   })
 );

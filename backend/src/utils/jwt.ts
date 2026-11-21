@@ -10,6 +10,7 @@ export interface AccessTokenPayload {
   organizationId: string | null;
   role: string;
   name: string;
+  phone?: string;
   staffPermissions?: StaffPermissions;
   parentStudentIds?: string[];
   permissions?: StaffPermissions;
@@ -58,6 +59,7 @@ export const generateAccessToken = (user: IUser): string => {
     organizationId: user.organizationId ? user.organizationId.toString() : null,
     role: user.role,
     name: user.name,
+    phone: user.phone,
     staffPermissions: user.staffPermissions,
     parentStudentIds: user.parentStudentIds?.map((id) => id.toString()),
     permissions: user.staffPermissions
@@ -96,6 +98,7 @@ export const verifyAccessToken = (token: string): AccessTokenPayload => {
     organizationId: decoded.organizationId ?? null,
     role: decoded.role,
     name: decoded.name,
+    phone: decoded.phone,
     staffPermissions: decoded.staffPermissions,
     parentStudentIds: decoded.parentStudentIds,
     permissions: decoded.permissions,

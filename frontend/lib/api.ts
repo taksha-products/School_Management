@@ -38,9 +38,16 @@ const processRefreshQueue = (success: boolean): void => {
 
 const redirectToLogin = (): void => {
   clearUser();
-  if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
-    window.location.href = "/login";
+  if (typeof window === "undefined") {
+    return;
   }
+  const path = window.location.pathname;
+  const isOnStaffLogin = path === "/login" || path.startsWith("/login/");
+  const isOnParentLogin = path === "/parent/login" || path.startsWith("/parent/login/");
+  if (isOnStaffLogin || isOnParentLogin) {
+    return;
+  }
+  window.location.href = path.startsWith("/parent") ? "/parent/login" : "/login";
 };
 
 const refreshAccessToken = async (): Promise<boolean> => {

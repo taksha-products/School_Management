@@ -128,8 +128,16 @@ const resolveAuthenticatedRole = async (
  * Next.js edge middleware — validates session by forwarding browser cookies to the API.
  * Calls the backend directly (middleware runs before Next.js rewrites).
  */
+const loginPathForPrefix = (pathname: string): string =>
+  pathname.startsWith("/parent") ? "/parent/login" : "/login";
+
 export async function middleware(request: NextRequest): Promise<NextResponse> {
   const { pathname } = request.nextUrl;
+
+  // Public parent OTP login — must not require an authenticated session.
+  if (pathname === "/parent/login" || pathname.startsWith("/parent/login/")) {
+    return NextResponse.next();
+  }
 
   if (!protectedPrefixes.some((prefix) => pathname.startsWith(prefix))) {
     return NextResponse.next();
@@ -139,7 +147,7 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
     const { role, cookieResponse } = await resolveAuthenticatedRole(request);
 
     if (!role) {
-      return NextResponse.redirect(new URL("/login", request.url));
+      return NextResponse.redirect(new URL(loginPathForPrefix(pathname), request.url));
     }
 
     if (pathname.startsWith("/principal")) {
@@ -153,7 +161,7 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
 
     return cookieResponse ?? NextResponse.next();
   } catch {
-    return NextResponse.redirect(new URL("/login", request.url));
+    return NextResponse.redirect(new URL(loginPathForPrefix(pathname), request.url));
   }
 }
 
