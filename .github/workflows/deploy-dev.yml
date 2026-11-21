@@ -32,14 +32,17 @@ jobs:
             backend/package-lock.json
             frontend/package-lock.json
 
-      - name: Backend install & compile
+      - name: Backend install & lint (typecheck)
         working-directory: backend
         run: |
           npm ci
-          npx tsc -p tsconfig.json --noEmit
+          npm run lint
 
       - name: Frontend install & lint
         working-directory: frontend
+        env:
+          # Prevent next lint interactive ESLint setup prompt in CI
+          CI: "true"
         run: |
           npm ci
           npm run lint
@@ -48,6 +51,7 @@ jobs:
         working-directory: frontend
         env:
           BACKEND_URL: http://backend:5000
+          CI: "true"
         run: npm run build
 
   docker:
