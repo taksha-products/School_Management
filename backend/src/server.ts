@@ -94,6 +94,10 @@ if (process.env.NODE_ENV === "production") {
 ensureLogosDir();
 app.use("/logos", express.static(path.join(process.cwd(), "public", "logos")));
 
+app.get("/api/health", (_req, res) => {
+  res.json({ success: true, status: "ok" });
+});
+
 app.use("/api/auth", authRouter);
 app.use("/api/org/theme", orgThemeRouter);
 app.use("/api/admin/settings/branding", adminBrandingRouter);

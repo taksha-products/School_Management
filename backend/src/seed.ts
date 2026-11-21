@@ -1,5 +1,10 @@
-import "dotenv/config";
+import path from "path";
+import dotenv from "dotenv";
 import bcrypt from "bcryptjs";
+
+// Prefer repo-root .env (Docker / local), fall back to backend/.env
+dotenv.config({ path: path.resolve(__dirname, "../../.env") });
+dotenv.config();
 
 import { connectDB } from "./config/db";
 import { Bus } from "./models/Bus";
@@ -8,12 +13,16 @@ import { FeeGroup } from "./models/FeeGroup";
 import { FeeLedger } from "./models/FeeLedger";
 import { FeePayment, type FeePaymentStatus } from "./models/FeePayment";
 import { FeeStructure } from "./models/FeeStructure";
+import { GpsDevice } from "./models/GpsDevice";
+import { GpsLog } from "./models/GpsLog";
 import { Organization } from "./models/Organization";
+import { RefreshToken } from "./models/RefreshToken";
 import { SchoolFeePayment } from "./models/SchoolFeePayment";
 import { Student } from "./models/Student";
 import { StudentFeeAssignment } from "./models/StudentFeeAssignment";
 import { StudentTransport } from "./models/StudentTransport";
 import { User } from "./models/User";
+import { ensureParentAccountForStudent } from "./services/parentProvisioning";
 import { assignFeeStructureToStudents } from "./utils/schoolFeeLedger";
 import { getCurrentAcademicYear } from "./utils/academicYear";
 import { encryptSecretForStorage, generateBackupCodes } from "./utils/totp";
@@ -23,11 +32,255 @@ const START_YEAR = ACADEMIC_YEAR.slice(0, 4);
 /** Base32 secret used for seeded super-admin 2FA in development/E2E. */
 const SEED_SUPER_ADMIN_TOTP_SECRET = "JBSWY3DPEHPK3PXP";
 
-const seed = async (): Promise<void> => {
-  await connectDB();
-  console.log("Connected to MongoDB");
+interface SeedStudentRow {
+  admissionNo: string;
+  name: string;
+  grade: string;
+  section: string;
+  parentName: string;
+  parentPhone: string;
+  address: string;
+}
 
-  console.log("Clearing existing collections...");
+/**
+ * EDGE CASE A — One school, same parent, 2 different students (siblings).
+ * Phone 9876500001 → Aarav + Anaya at Greenfield only (one parent User, two kids).
+ *
+ * EDGE CASE B — Two schools, same parent phone, 2 different students.
+ * Phone 9876500001 → Aarav at Greenfield + Riya at Riverside
+ * (two parent User accounts, one per org; OTP shows school picker).
+ *
+ * EDGE CASE C — Extra same-school siblings for regression (Reddy / Khan / Joshi / Krishnan).
+ */
+const GREENFIELD_STUDENTS: SeedStudentRow[] = [
+  // --- EDGE A + B (Greenfield side): Rohit Sharma ---
+  {
+    admissionNo: "GF-2026-0001",
+    name: "Aarav Sharma",
+    grade: "1",
+    section: "A",
+    parentName: "Rohit Sharma",
+    parentPhone: "9876500001",
+    address: "12, 4th Cross, Koramangala, Bengaluru"
+  },
+  {
+    admissionNo: "GF-2026-0002",
+    name: "Anaya Sharma",
+    grade: "3",
+    section: "B",
+    parentName: "Rohit Sharma",
+    parentPhone: "9876500001",
+    address: "12, 4th Cross, Koramangala, Bengaluru"
+  },
+  // --- single-child parents ---
+  {
+    admissionNo: "GF-2026-0003",
+    name: "Vihaan Patel",
+    grade: "2",
+    section: "A",
+    parentName: "Meera Patel",
+    parentPhone: "9876500002",
+    address: "45, MG Road, Indiranagar, Bengaluru"
+  },
+  // --- EDGE C: same-school siblings ---
+  {
+    admissionNo: "GF-2026-0004",
+    name: "Ishaan Reddy",
+    grade: "4",
+    section: "A",
+    parentName: "Suresh Reddy",
+    parentPhone: "9876500003",
+    address: "8, 100 Feet Road, HSR Layout, Bengaluru"
+  },
+  {
+    admissionNo: "GF-2026-0005",
+    name: "Saanvi Reddy",
+    grade: "6",
+    section: "B",
+    parentName: "Suresh Reddy",
+    parentPhone: "9876500003",
+    address: "8, 100 Feet Road, HSR Layout, Bengaluru"
+  },
+  {
+    admissionNo: "GF-2026-0006",
+    name: "Advait Nair",
+    grade: "5",
+    section: "A",
+    parentName: "Lakshmi Nair",
+    parentPhone: "9876500004",
+    address: "22, JP Nagar 5th Phase, Bengaluru"
+  },
+  {
+    admissionNo: "GF-2026-0007",
+    name: "Myra Iyer",
+    grade: "7",
+    section: "A",
+    parentName: "Karthik Iyer",
+    parentPhone: "9876500005",
+    address: "3, Banashankari 2nd Stage, Bengaluru"
+  },
+  {
+    admissionNo: "GF-2026-0008",
+    name: "Kabir Khan",
+    grade: "8",
+    section: "B",
+    parentName: "Imran Khan",
+    parentPhone: "9876500006",
+    address: "19, Frazer Town, Bengaluru"
+  },
+  {
+    admissionNo: "GF-2026-0009",
+    name: "Diya Khan",
+    grade: "5",
+    section: "C",
+    parentName: "Imran Khan",
+    parentPhone: "9876500006",
+    address: "19, Frazer Town, Bengaluru"
+  },
+  {
+    admissionNo: "GF-2026-0010",
+    name: "Arjun Menon",
+    grade: "9",
+    section: "A",
+    parentName: "Priya Menon",
+    parentPhone: "9876500007",
+    address: "67, Whitefield Main Road, Bengaluru"
+  },
+  {
+    admissionNo: "GF-2026-0011",
+    name: "Kiara Das",
+    grade: "10",
+    section: "A",
+    parentName: "Amit Das",
+    parentPhone: "9876500008",
+    address: "14, Electronic City Phase 1, Bengaluru"
+  },
+  {
+    admissionNo: "GF-2026-0012",
+    name: "Reyansh Gupta",
+    grade: "6",
+    section: "A",
+    parentName: "Neha Gupta",
+    parentPhone: "9876500009",
+    address: "5, Malleswaram 18th Cross, Bengaluru"
+  },
+  {
+    admissionNo: "GF-2026-0013",
+    name: "Aisha Begum",
+    grade: "3",
+    section: "A",
+    parentName: "Farhan Begum",
+    parentPhone: "9876500010",
+    address: "31, Shivajinagar, Bengaluru"
+  },
+  {
+    admissionNo: "GF-2026-0014",
+    name: "Vivaan Joshi",
+    grade: "11",
+    section: "A",
+    parentName: "Ramesh Joshi",
+    parentPhone: "9876500011",
+    address: "9, Jayanagar 4th Block, Bengaluru"
+  },
+  {
+    admissionNo: "GF-2026-0015",
+    name: "Pari Joshi",
+    grade: "8",
+    section: "A",
+    parentName: "Ramesh Joshi",
+    parentPhone: "9876500011",
+    address: "9, Jayanagar 4th Block, Bengaluru"
+  },
+  {
+    admissionNo: "GF-2026-0016",
+    name: "Shaurya Rao",
+    grade: "12",
+    section: "B",
+    parentName: "Anita Rao",
+    parentPhone: "9876500012",
+    address: "2, Yelahanka New Town, Bengaluru"
+  },
+  {
+    admissionNo: "GF-2026-0017",
+    name: "Navya Krishnan",
+    grade: "4",
+    section: "B",
+    parentName: "Suresh Krishnan",
+    parentPhone: "9876500013",
+    address: "55, RT Nagar, Bengaluru"
+  },
+  {
+    admissionNo: "GF-2026-0018",
+    name: "Dev Krishnan",
+    grade: "2",
+    section: "B",
+    parentName: "Suresh Krishnan",
+    parentPhone: "9876500013",
+    address: "55, RT Nagar, Bengaluru"
+  },
+  {
+    admissionNo: "GF-2026-0019",
+    name: "Anvi Shetty",
+    grade: "7",
+    section: "B",
+    parentName: "Deepa Shetty",
+    parentPhone: "9876500014",
+    address: "18, Basavanagudi, Bengaluru"
+  },
+  {
+    admissionNo: "GF-2026-0020",
+    name: "Atharv Pillai",
+    grade: "1",
+    section: "B",
+    parentName: "Vikram Pillai",
+    parentPhone: "9876500015",
+    address: "7, Hebbal Kempapura, Bengaluru"
+  }
+];
+
+/**
+ * Riverside Academy
+ * EDGE B (Riverside side): different student Riya Sharma, same parent phone 9876500001
+ * EDGE A at Riverside: Kavita Mehta has Tara + Om (siblings in one school)
+ */
+const RIVERSIDE_STUDENTS: SeedStudentRow[] = [
+  {
+    admissionNo: "RS-2026-0001",
+    name: "Riya Sharma",
+    grade: "2",
+    section: "A",
+    parentName: "Rohit Sharma",
+    parentPhone: "9876500001",
+    address: "12, 4th Cross, Koramangala, Bengaluru"
+  },
+  {
+    admissionNo: "RS-2026-0002",
+    name: "Tara Mehta",
+    grade: "5",
+    section: "A",
+    parentName: "Kavita Mehta",
+    parentPhone: "9876500100",
+    address: "21, Cubbon Road, Bengaluru"
+  },
+  {
+    admissionNo: "RS-2026-0003",
+    name: "Om Mehta",
+    grade: "3",
+    section: "B",
+    parentName: "Kavita Mehta",
+    parentPhone: "9876500100",
+    address: "21, Cubbon Road, Bengaluru"
+  }
+];
+
+const schoolGrades = (): Array<{ label: string; sections: string[] }> =>
+  Array.from({ length: 12 }, (_, i) => ({
+    label: String(i + 1),
+    sections: ["A", "B", "C"]
+  }));
+
+const clearAllData = async (): Promise<void> => {
+  console.log("Clearing existing collections (including demo school data)...");
   await Promise.all([
     User.deleteMany({}),
     Organization.deleteMany({}),
@@ -40,28 +293,99 @@ const seed = async (): Promise<void> => {
     FeeStructure.deleteMany({}),
     StudentFeeAssignment.deleteMany({}),
     FeeLedger.deleteMany({}),
-    SchoolFeePayment.deleteMany({})
+    SchoolFeePayment.deleteMany({}),
+    RefreshToken.deleteMany({}),
+    GpsDevice.deleteMany({}),
+    GpsLog.deleteMany({})
   ]);
   console.log("Collections cleared");
+};
 
-  console.log("Creating organization...");
-  const demoSchool = await Organization.create({
-    name: "Demo School",
-    code: "demo-school",
-    plan: "trial",
-    isActive: true,
-    currentAcademicYear: ACADEMIC_YEAR
-  });
-  console.log(`Organization created: ${demoSchool.name}`);
+const provisionParentsForStudents = async (
+  organizationId: string,
+  students: Array<{ _id: import("mongoose").Types.ObjectId; parentName: string; parentPhone: string }>
+): Promise<void> => {
+  for (const student of students) {
+    const parent = await ensureParentAccountForStudent({
+      organizationId,
+      studentId: student._id,
+      parentName: student.parentName,
+      parentPhone: student.parentPhone
+    });
+    await Student.updateOne(
+      { _id: student._id },
+      { $set: { parentUserId: parent.parentUserId } }
+    );
+  }
+};
 
-  const orgId = demoSchool._id;
+const seed = async (): Promise<void> => {
+  await connectDB();
+  console.log("Connected to MongoDB");
 
-  console.log("Creating users...");
+  await clearAllData();
+
+  console.log("Creating organizations...");
+  const [greenfield, riverside] = await Organization.insertMany([
+    {
+      name: "Greenfield Public School",
+      code: "greenfield",
+      displayName: "Greenfield",
+      brandColor: "#0F766E",
+      address: "100, Outer Ring Road, Bengaluru",
+      phone: "08041234567",
+      email: "office@greenfield.school",
+      plan: "pro",
+      isActive: true,
+      currentAcademicYear: ACADEMIC_YEAR,
+      institutionType: "school",
+      grades: schoolGrades(),
+      features: {
+        busManagement: true,
+        gpsTracking: false,
+        schoolFees: true,
+        onlinePayments: true,
+        parentPortal: true,
+        bulkOperations: true,
+        expenseTracking: true,
+        whatsappNotifications: false,
+        transportManagement: true
+      }
+    },
+    {
+      name: "Riverside Academy",
+      code: "riverside",
+      displayName: "Riverside",
+      brandColor: "#1D4ED8",
+      address: "50, Cubbon Park Road, Bengaluru",
+      phone: "08049876543",
+      email: "hello@riverside.academy",
+      plan: "trial",
+      isActive: true,
+      currentAcademicYear: ACADEMIC_YEAR,
+      institutionType: "school",
+      grades: schoolGrades(),
+      features: {
+        busManagement: true,
+        gpsTracking: false,
+        schoolFees: true,
+        onlinePayments: false,
+        parentPortal: true,
+        bulkOperations: true,
+        expenseTracking: true,
+        whatsappNotifications: false,
+        transportManagement: true
+      }
+    }
+  ]);
+  console.log(`Organizations: ${greenfield.name}, ${riverside.name}`);
+
+  console.log("Creating platform + school admin users...");
   const superAdminBackupCodes = await generateBackupCodes();
-  const [superAdmin, orgAdmin, staff, parent] = await User.insertMany([
+  const [superAdmin, greenfieldAdmin, greenfieldStaff] = await User.insertMany([
     {
       name: "Super Admin",
-      email: "super@taksha.com",
+      email: "super@bustrack.com",
       passwordHash: await bcrypt.hash("super123", 10),
       role: "superAdmin",
       organizationId: null,
@@ -72,110 +396,164 @@ const seed = async (): Promise<void> => {
       backupCodes: superAdminBackupCodes.hashed
     },
     {
-      name: "Demo School Admin",
-      email: "admin@demoschool.com",
+      name: "Greenfield Admin",
+      email: "admin@greenfield.school",
       passwordHash: await bcrypt.hash("admin123", 10),
       role: "orgAdmin",
-      organizationId: orgId,
+      organizationId: greenfield._id,
       isActive: true
     },
     {
-      name: "Demo School Staff",
-      email: "staff@demoschool.com",
+      name: "Greenfield Fee Staff",
+      email: "staff@greenfield.school",
       passwordHash: await bcrypt.hash("staff123", 10),
       role: "staff",
-      organizationId: orgId,
+      organizationId: greenfield._id,
       staffPermissions: {
         canCollectFees: true,
-        canManageStudents: false,
+        canManageStudents: true,
         canViewReports: true,
         canManageBuses: false
       },
       isActive: true
-    },
-    {
-      name: "Demo School Parent",
-      email: "parent@demoschool.com",
-      passwordHash: await bcrypt.hash("parent123", 10),
-      role: "parent",
-      organizationId: orgId,
-      parentStudentIds: [],
-      isActive: true
     }
   ]);
-  console.log("Users created");
 
-  console.log("Creating buses...");
-  const busPayload = Array.from({ length: 6 }).map((_, index) => ({
-    organizationId: orgId,
-    busNumber: `Bus ${index + 1}`,
-    routeName: `Route ${String.fromCharCode(65 + index)}`,
-    driverName: `Driver ${index + 1}`,
-    driverPhone: `90000000${index + 1}`.slice(-10),
-    capacity: 40,
-    status: "active" as const
-  }));
-  const buses = await Bus.insertMany(busPayload);
-  console.log(`Created ${buses.length} buses`);
-
-  console.log("Creating 30 students (no bus assignment on student record)...");
-  const studentPayload = Array.from({ length: 30 }).map((_, index) => ({
-    organizationId: orgId,
-    name: `Student ${index + 1}`,
-    grade: `${(index % 5) + 1}`,
-    parentName: `Parent ${index + 1}`,
-    parentPhone: `8000000${String(index).padStart(3, "0")}`.slice(-10),
-    address: `Address for Student ${index + 1}`,
-    status: "active" as const,
-    academicYear: ACADEMIC_YEAR
-  }));
-  const students = await Student.insertMany(studentPayload);
-  console.log(`Created ${students.length} students`);
-
-  await User.findByIdAndUpdate(parent._id, {
-    parentStudentIds: [students[0]._id, students[1]._id]
+  await User.create({
+    name: "Riverside Admin",
+    email: "admin@riverside.academy",
+    passwordHash: await bcrypt.hash("admin123", 10),
+    role: "orgAdmin",
+    organizationId: riverside._id,
+    isActive: true
   });
-  console.log("Linked parent to students 1 and 2");
+  console.log("Admins/staff created");
+
+  console.log("Creating buses for Greenfield...");
+  const buses = await Bus.insertMany([
+    {
+      organizationId: greenfield._id,
+      busNumber: "KA-01-GF-01",
+      routeName: "Koramangala – School",
+      driverName: "Ramesh Kumar",
+      driverPhone: "9000010001",
+      capacity: 40,
+      status: "active"
+    },
+    {
+      organizationId: greenfield._id,
+      busNumber: "KA-01-GF-02",
+      routeName: "Indiranagar – School",
+      driverName: "Suresh Babu",
+      driverPhone: "9000010002",
+      capacity: 40,
+      status: "active"
+    },
+    {
+      organizationId: greenfield._id,
+      busNumber: "KA-01-GF-03",
+      routeName: "HSR / BTM – School",
+      driverName: "Manoj Singh",
+      driverPhone: "9000010003",
+      capacity: 35,
+      status: "active"
+    },
+    {
+      organizationId: greenfield._id,
+      busNumber: "KA-01-GF-04",
+      routeName: "Whitefield – School",
+      driverName: "Anil Yadav",
+      driverPhone: "9000010004",
+      capacity: 40,
+      status: "active"
+    }
+  ]);
+
+  console.log("Creating Greenfield students...");
+  const greenfieldStudents = await Student.insertMany(
+    GREENFIELD_STUDENTS.map((row) => ({
+      organizationId: greenfield._id,
+      admissionNo: row.admissionNo,
+      name: row.name,
+      grade: row.grade,
+      section: row.section,
+      parentName: row.parentName,
+      parentPhone: row.parentPhone,
+      address: row.address,
+      status: "active" as const,
+      academicYear: ACADEMIC_YEAR
+    }))
+  );
+  await provisionParentsForStudents(
+    greenfield._id.toString(),
+    greenfieldStudents.map((s) => ({
+      _id: s._id,
+      parentName: s.parentName,
+      parentPhone: s.parentPhone
+    }))
+  );
+  console.log(`Greenfield: ${greenfieldStudents.length} students + parent accounts`);
+
+  console.log("Creating Riverside students (includes shared parent phone 9876500001)...");
+  const riversideStudents = await Student.insertMany(
+    RIVERSIDE_STUDENTS.map((row) => ({
+      organizationId: riverside._id,
+      admissionNo: row.admissionNo,
+      name: row.name,
+      grade: row.grade,
+      section: row.section,
+      parentName: row.parentName,
+      parentPhone: row.parentPhone,
+      address: row.address,
+      status: "active" as const,
+      academicYear: ACADEMIC_YEAR
+    }))
+  );
+  await provisionParentsForStudents(
+    riverside._id.toString(),
+    riversideStudents.map((s) => ({
+      _id: s._id,
+      parentName: s.parentName,
+      parentPhone: s.parentPhone
+    }))
+  );
+  console.log(`Riverside: ${riversideStudents.length} students + parent accounts`);
 
   console.log("Creating transport registrations...");
-  const transportAssignments: Array<{
-    studentIndexes: number[];
-    busIndex: number;
-    fee: number;
-    pickupStop?: string;
-  }> = [
-    { studentIndexes: [0, 1, 2, 3, 4], busIndex: 0, fee: 1500, pickupStop: "Koramangala" },
-    { studentIndexes: [5, 6, 7, 8, 9], busIndex: 1, fee: 1500 },
-    { studentIndexes: [10, 11, 12, 13, 14], busIndex: 2, fee: 1800 },
-    { studentIndexes: [15, 16, 17], busIndex: 3, fee: 1500 },
-    { studentIndexes: [20, 21, 22], busIndex: 4, fee: 1500 },
-    { studentIndexes: [25, 26, 27], busIndex: 5, fee: 1500 }
+  const transportPlan: Array<{ studentIndexes: number[]; busIndex: number; fee: number; stop: string }> = [
+    { studentIndexes: [0, 1, 2, 3, 4], busIndex: 0, fee: 1800, stop: "Koramangala Water Tank" },
+    { studentIndexes: [5, 6, 7, 8], busIndex: 1, fee: 1700, stop: "Indiranagar 100 Feet" },
+    { studentIndexes: [9, 10, 11, 12], busIndex: 2, fee: 1600, stop: "HSR BDA Complex" },
+    { studentIndexes: [13, 14, 15], busIndex: 3, fee: 2000, stop: "Whitefield Forum" }
   ];
 
   const transports = await StudentTransport.insertMany(
-    transportAssignments.flatMap(({ studentIndexes, busIndex, fee, pickupStop }) =>
+    transportPlan.flatMap(({ studentIndexes, busIndex, fee, stop }) =>
       studentIndexes.map((studentIndex) => ({
-        organizationId: orgId,
-        studentId: students[studentIndex]._id,
+        organizationId: greenfield._id,
+        studentId: greenfieldStudents[studentIndex]._id,
         busId: buses[busIndex]._id,
         monthlyTransportFee: fee,
-        pickupStop,
+        pickupStop: stop,
+        dropStop: stop,
         effectiveFrom: new Date(`${START_YEAR}-04-01T00:00:00.000Z`),
         effectiveTo: null,
         status: "active" as const,
         academicYear: ACADEMIC_YEAR,
-        addedBy: orgAdmin._id
+        addedBy: greenfieldAdmin._id
       }))
     )
   );
-  console.log(`Created ${transports.length} active transport records (18 on bus, 12 not using bus)`);
+  console.log(`Created ${transports.length} transport records`);
 
-  const transportByStudent = new Map(
-    transports.map((t) => [String(t.studentId), t])
-  );
-
-  console.log("Creating fee payments for transport-registered students...");
-  const months = [`${START_YEAR}-04`, `${START_YEAR}-05`, `${START_YEAR}-06`, `${START_YEAR}-07`, `${START_YEAR}-08`];
+  console.log("Creating transport fee payments...");
+  const months = [
+    `${START_YEAR}-04`,
+    `${START_YEAR}-05`,
+    `${START_YEAR}-06`,
+    `${START_YEAR}-07`,
+    `${START_YEAR}-08`
+  ];
   const statusCycle: FeePaymentStatus[] = ["paid", "partial", "pending", "overdue"];
 
   const feePaymentPayload = transports.flatMap((transport, transportIndex) =>
@@ -190,22 +568,20 @@ const seed = async (): Promise<void> => {
       if (status === "paid") {
         amountPaid = amount;
         paidAt = new Date(`${month}-10T10:00:00.000Z`);
-        collectedBy = orgAdmin._id;
+        collectedBy = greenfieldAdmin._id;
       } else if (status === "partial") {
         amountPaid = Math.floor(amount * 0.5);
         paidAt = new Date(`${month}-12T10:00:00.000Z`);
-        collectedBy = orgAdmin._id;
+        collectedBy = greenfieldStaff._id;
         notes = "Partial payment received in cash";
       } else if (status === "pending") {
-        amountPaid = 0;
         notes = "Payment not collected yet";
       } else {
-        amountPaid = 0;
         notes = "Overdue payment";
       }
 
       return {
-        organizationId: orgId,
+        organizationId: greenfield._id,
         studentId: transport.studentId,
         busId: transport.busId,
         transportId: transport._id,
@@ -216,62 +592,53 @@ const seed = async (): Promise<void> => {
         status,
         paidAt,
         collectedBy,
-        notes
+        notes,
+        paymentMode: "cash" as const,
+        webhookVerified: false
       };
     })
   );
   await FeePayment.insertMany(feePaymentPayload);
-  console.log(`Created ${feePaymentPayload.length} fee payment records`);
+  console.log(`Created ${feePaymentPayload.length} transport fee payments`);
 
   console.log("Creating expenses...");
-  const expensePayload = buses.flatMap((bus) => [
-    {
-      organizationId: orgId,
-      busId: bus._id,
-      category: "diesel" as const,
-      amount: 9000,
-      date: new Date(`${START_YEAR}-04-05T10:00:00.000Z`),
-      vendor: "Local Fuel Station",
-      notes: "Monthly diesel refill",
-      academicYear: ACADEMIC_YEAR,
-      addedBy: orgAdmin._id
-    },
-    {
-      organizationId: orgId,
-      busId: bus._id,
-      category: "maintenance" as const,
-      amount: 3500,
-      date: new Date(`${START_YEAR}-04-15T10:00:00.000Z`),
-      vendor: "City Auto Garage",
-      notes: "Routine maintenance",
-      academicYear: ACADEMIC_YEAR,
-      addedBy: orgAdmin._id
-    },
-    {
-      organizationId: orgId,
-      busId: bus._id,
-      category: "other" as const,
-      amount: 1200,
-      date: new Date(`${START_YEAR}-04-20T10:00:00.000Z`),
-      vendor: "Accessories Shop",
-      notes: "Cleaning and accessories",
-      academicYear: ACADEMIC_YEAR,
-      addedBy: staff._id
-    }
-  ]);
-  await Expense.insertMany(expensePayload);
-  console.log(`Created ${expensePayload.length} expense records`);
+  await Expense.insertMany(
+    buses.flatMap((bus) => [
+      {
+        organizationId: greenfield._id,
+        busId: bus._id,
+        category: "diesel" as const,
+        amount: 9500,
+        date: new Date(`${START_YEAR}-04-05T10:00:00.000Z`),
+        vendor: "Indian Oil – ORR",
+        notes: "Monthly diesel",
+        academicYear: ACADEMIC_YEAR,
+        addedBy: greenfieldAdmin._id
+      },
+      {
+        organizationId: greenfield._id,
+        busId: bus._id,
+        category: "maintenance" as const,
+        amount: 4200,
+        date: new Date(`${START_YEAR}-04-15T10:00:00.000Z`),
+        vendor: "City Auto Care",
+        notes: "Service + tyres check",
+        academicYear: ACADEMIC_YEAR,
+        addedBy: greenfieldAdmin._id
+      }
+    ])
+  );
 
-  console.log("Creating school fee structure...");
+  console.log("Creating school fee structure + ledger...");
   const feeStructure = await FeeStructure.create({
-    organizationId: orgId,
-    name: `Standard Fee Structure ${ACADEMIC_YEAR}`,
+    organizationId: greenfield._id,
+    name: `Greenfield Standard ${ACADEMIC_YEAR}`,
     academicYear: ACADEMIC_YEAR,
     applicableGrades: [],
     feeHeads: [
       {
         name: "Tuition Fee",
-        amount: 5000,
+        amount: 5500,
         frequency: "monthly",
         dueDay: 10,
         isOptional: false,
@@ -279,7 +646,7 @@ const seed = async (): Promise<void> => {
       },
       {
         name: "Lab Fee",
-        amount: 2000,
+        amount: 2500,
         frequency: "quarterly",
         dueDay: 15,
         isOptional: false,
@@ -287,7 +654,7 @@ const seed = async (): Promise<void> => {
       },
       {
         name: "Sports Fee",
-        amount: 1500,
+        amount: 2000,
         frequency: "annual",
         dueDay: 10,
         isOptional: true,
@@ -298,18 +665,18 @@ const seed = async (): Promise<void> => {
   });
 
   const assignResult = await assignFeeStructureToStudents(
-    orgId,
+    greenfield._id,
     feeStructure,
-    students.map((s) => s._id),
+    greenfieldStudents.map((s) => s._id),
     ACADEMIC_YEAR
   );
   console.log(
-    `Assigned fee structure to ${assignResult.assignments} students, ${assignResult.ledgerEntries} ledger entries created`
+    `Assigned fees to ${assignResult.assignments} students (${assignResult.ledgerEntries} ledger rows)`
   );
 
-  const student1 = students[0];
+  const aarav = greenfieldStudents[0];
   const aprilLedger = await FeeLedger.findOne({
-    studentId: student1._id,
+    studentId: aarav._id,
     feeHeadName: "Tuition Fee",
     periodLabel: `${START_YEAR}-04`,
     academicYear: ACADEMIC_YEAR
@@ -318,13 +685,13 @@ const seed = async (): Promise<void> => {
     aprilLedger.amountPaid = aprilLedger.amountDue;
     aprilLedger.status = "paid";
     const samplePayment = await SchoolFeePayment.create({
-      organizationId: orgId,
-      studentId: student1._id,
-      receiptNumber: "RCP-SEED-SAMPLE01",
+      organizationId: greenfield._id,
+      studentId: aarav._id,
+      receiptNumber: "RCP-GF-SEED-0001",
       academicYear: ACADEMIC_YEAR,
       paymentDate: new Date(`${START_YEAR}-04-08T10:00:00.000Z`),
       paymentMode: "cash",
-      collectedBy: staff._id,
+      collectedBy: greenfieldStaff._id,
       feeHeadPayments: [
         {
           feeHeadName: "Tuition Fee",
@@ -338,22 +705,50 @@ const seed = async (): Promise<void> => {
       totalAmountDue: aprilLedger.amountDue,
       totalAmountPaid: aprilLedger.amountDue,
       totalLateFee: 0,
-      notes: "Sample school fee payment"
+      notes: "Seed sample — Aarav Sharma April tuition"
     });
     aprilLedger.paymentId = samplePayment._id;
     await aprilLedger.save();
-    console.log("Created sample school fee payment for Student 1 (April tuition)");
   }
 
-  void transportByStudent;
+  void superAdmin;
 
-  console.log("\n--- Seed credentials ---");
-  console.log("Super Admin: super@taksha.com / super123");
-  console.log("Org Admin:   admin@demoschool.com / admin123");
-  console.log("Staff:       staff@demoschool.com / staff123");
-  console.log("Parent:      parent@demoschool.com / parent123");
-  console.log(`Organization: ${demoSchool.name} (${demoSchool.code})`);
-  console.log("Seeding completed successfully");
+  const rohitGreenfield = await User.findOne({
+    phone: "9876500001",
+    organizationId: greenfield._id,
+    role: "parent"
+  });
+  const rohitRiverside = await User.findOne({
+    phone: "9876500001",
+    organizationId: riverside._id,
+    role: "parent"
+  });
+
+  console.log("\n--- Seed complete ---");
+  console.log("Super Admin:      super@bustrack.com / super123");
+  console.log("Super Admin TOTP secret (Authenticator): " + SEED_SUPER_ADMIN_TOTP_SECRET);
+  console.log(
+    "Super Admin otpauth: otpauth://totp/EduNex:super@bustrack.com?secret=" +
+      SEED_SUPER_ADMIN_TOTP_SECRET +
+      "&issuer=EduNex"
+  );
+  console.log("Greenfield Admin: admin@greenfield.school / admin123");
+  console.log("Greenfield Staff: staff@greenfield.school / staff123");
+  console.log("Riverside Admin:  admin@riverside.academy / admin123");
+  console.log(`Orgs: ${greenfield.code}, ${riverside.code}`);
+  console.log("\n--- Edge cases ---");
+  console.log("A) Same school, same parent, 2 students:");
+  console.log("   phone 9876500001 @ greenfield → Aarav Sharma + Anaya Sharma");
+  console.log("   phone 9876500100 @ riverside  → Tara Mehta + Om Mehta");
+  console.log("B) Two schools, same parent phone, different students:");
+  console.log("   phone 9876500001 → Aarav/Anaya (greenfield) + Riya Sharma (riverside)");
+  console.log("   OTP verify → requiresSchoolSelection popup");
+  console.log(
+    `   Greenfield parentUserId: ${rohitGreenfield?._id?.toString() ?? "n/a"}`
+  );
+  console.log(
+    `   Riverside parentUserId:  ${rohitRiverside?._id?.toString() ?? "n/a"}`
+  );
 };
 
 void seed()

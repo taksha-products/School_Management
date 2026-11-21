@@ -26,10 +26,21 @@ export interface Student {
   section?: string;
   parentName: string;
   parentPhone: string;
+  parentUserId?: string;
   address?: string;
   status: "active" | "inactive";
   academicYear: string;
   transport?: StudentTransportInfo | null;
+}
+
+export interface ParentAccountProvision {
+  studentId?: string;
+  parentUserId: string;
+  name: string;
+  phone: string;
+  email: string;
+  created: boolean;
+  temporaryPassword?: string;
 }
 
 export interface StudentTransportRecord {

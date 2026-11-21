@@ -5,8 +5,10 @@ import { Types } from "mongoose";
 import { auth, type AuthenticatedRequest } from "../../middleware/auth";
 import { isSuperAdmin } from "../../middleware/roleCheck";
 import { User, type IUser, type UserRole } from "../../models/User";
+import { syncParentDetailsToLinkedStudents } from "../../services/parentProvisioning";
 import { asyncHandler } from "../../utils/asyncHandler";
 import { paginate, parsePaginationQuery } from "../../utils/paginate";
+import { normalizeIndianMobile } from "../../utils/phone";
 
 const superAdminUsersRouter = Router();
 
@@ -47,6 +49,7 @@ superAdminUsersRouter.post(
       name,
       email,
       password,
+      phone,
       role,
       organizationId,
       staffPermissions,
@@ -55,6 +58,7 @@ superAdminUsersRouter.post(
       name?: string;
       email?: string;
       password?: string;
+      phone?: string;
       role?: UserRole;
       organizationId?: string | null;
       staffPermissions?: IUser["staffPermissions"];
@@ -88,9 +92,52 @@ superAdminUsersRouter.post(
       return;
     }
 
+    let normalizedPhone: string | undefined;
+    if (role === "parent") {
+      if (!phone) {
+        res.status(400).json({
+          success: false,
+          data: null,
+          message: "phone is required for parent accounts (mobile OTP login)"
+        });
+        return;
+      }
+      const parsed = normalizeIndianMobile(phone);
+      if (!parsed) {
+        res.status(400).json({
+          success: false,
+          data: null,
+          message: "Enter a valid 10-digit Indian mobile number"
+        });
+        return;
+      }
+      if (!organizationId) {
+        res.status(400).json({
+          success: false,
+          data: null,
+          message: "organizationId is required for parent phone uniqueness"
+        });
+        return;
+      }
+      const phoneTaken = await User.findOne({
+        phone: parsed,
+        organizationId: new Types.ObjectId(organizationId)
+      }).select("_id");
+      if (phoneTaken) {
+        res.status(400).json({
+          success: false,
+          data: null,
+          message: "A user with this phone number already exists in this organization"
+        });
+        return;
+      }
+      normalizedPhone = parsed;
+    }
+
     const user = await User.create({
       name,
       email: email.toLowerCase(),
+      phone: normalizedPhone,
       passwordHash: await bcrypt.hash(password, 10),
       role,
       organizationId: organizationId ? new Types.ObjectId(organizationId) : null,
@@ -109,7 +156,7 @@ superAdminUsersRouter.post(
   })
 );
 
-const SUPER_ADMIN_USER_UPDATE_FIELDS = new Set(["name", "email", "password", "isActive"]);
+const SUPER_ADMIN_USER_UPDATE_FIELDS = new Set(["name", "email", "phone", "password", "isActive"]);
 
 superAdminUsersRouter.put(
   "/:id",
@@ -126,7 +173,7 @@ superAdminUsersRouter.put(
       res.status(400).json({
         success: false,
         data: null,
-        message: `Only name, email, password, and isActive may be updated (${unknownFields.join(", ")} rejected)`
+        message: `Only name, email, phone, password, and isActive may be updated (${unknownFields.join(", ")} rejected)`
       });
       return;
     }
@@ -181,6 +228,40 @@ superAdminUsersRouter.put(
       updates.email = email;
     }
 
+    if (typeof body.phone === "string") {
+      const parsed = normalizeIndianMobile(body.phone);
+      if (!parsed) {
+        res.status(400).json({
+          success: false,
+          data: null,
+          message: "Enter a valid 10-digit Indian mobile number"
+        });
+        return;
+      }
+      if (!existingUser.organizationId) {
+        res.status(400).json({
+          success: false,
+          data: null,
+          message: "Cannot set phone on a user without an organization"
+        });
+        return;
+      }
+      const phoneTaken = await User.findOne({
+        phone: parsed,
+        organizationId: existingUser.organizationId,
+        _id: { $ne: existingUser._id }
+      }).select("_id");
+      if (phoneTaken) {
+        res.status(400).json({
+          success: false,
+          data: null,
+          message: "A user with this phone number already exists in this organization"
+        });
+        return;
+      }
+      updates.phone = parsed;
+    }
+
     if (typeof body.password === "string") {
       if (body.password.length < 8) {
         res.status(400).json({
@@ -220,10 +301,23 @@ superAdminUsersRouter.put(
       return;
     }
 
+    let studentsSynced = 0;
+    if (user.role === "parent" && (updates.name || updates.phone)) {
+      studentsSynced = await syncParentDetailsToLinkedStudents({
+        parentUserId: user._id,
+        parentName: typeof updates.name === "string" ? updates.name : user.name,
+        parentPhone: typeof updates.phone === "string" ? String(updates.phone) : user.phone
+      });
+    }
+
     res.json({
       success: true,
       data: sanitizeUser(user),
-      message: "User updated successfully"
+      studentsSynced,
+      message:
+        user.role === "parent" && studentsSynced > 0
+          ? `Parent updated; ${studentsSynced} linked student record(s) synced`
+          : "User updated successfully"
     });
   })
 );

@@ -12,10 +12,18 @@ import {
 } from "../middleware/roleCheck";
 import { Student } from "../models/Student";
 import { StudentTransport } from "../models/StudentTransport";
+import {
+  ensureParentAccountForStudent,
+  unlinkStudentFromParent
+} from "../services/parentProvisioning";
 import { asyncHandler } from "../utils/asyncHandler";
 import { validate } from "../middleware/validate";
 import { getScopedOrganizationId, orgFilter } from "../utils/orgFilter";
-import { createStudentValidation } from "../validators/students";
+import { normalizeIndianMobile } from "../utils/phone";
+import {
+  createStudentValidation,
+  updateStudentValidation
+} from "../validators/students";
 import { paginate, parsePaginationQuery } from "../utils/paginate";
 import { sortGrades } from "../utils/gradeSort";
 
@@ -314,15 +322,68 @@ studentsRouter.post(
   validate,
   asyncHandler(async (req, res) => {
     const authReq = req as AuthenticatedRequest;
-    const { busId: _busId, monthlyFee: _monthlyFee, monthlyTransportFee: _mtf, ...body } =
-      req.body as Record<string, unknown>;
+    const orgId = getScopedOrganizationId(authReq, res)!;
+    const {
+      busId: _busId,
+      monthlyFee: _monthlyFee,
+      monthlyTransportFee: _mtf,
+      parentEmail,
+      ...body
+    } = req.body as Record<string, unknown> & {
+      parentName?: string;
+      parentPhone?: string;
+      parentEmail?: string;
+    };
+
+    const parentPhone = normalizeIndianMobile(String(body.parentPhone ?? ""));
+    if (!parentPhone || !body.parentName) {
+      res.status(400).json({
+        success: false,
+        data: null,
+        message: "parentName and a valid parentPhone are required"
+      });
+      return;
+    }
+
     const student = await Student.create({
       ...body,
-      organizationId: getScopedOrganizationId(authReq, res)
+      parentName: String(body.parentName).trim(),
+      parentPhone,
+      organizationId: orgId
     });
-    res
-      .status(201)
-      .json({ success: true, data: student, message: "Student created successfully" });
+
+    try {
+      const parentAccount = await ensureParentAccountForStudent({
+        organizationId: orgId,
+        studentId: student._id,
+        parentName: student.parentName,
+        parentPhone: student.parentPhone,
+        parentEmail: typeof parentEmail === "string" ? parentEmail : undefined
+      });
+
+      student.parentUserId = new Types.ObjectId(parentAccount.parentUserId);
+      await student.save();
+
+      res.status(201).json({
+        success: true,
+        data: student,
+        parentAccount,
+        message: parentAccount.created
+          ? "Student created and parent account provisioned"
+          : "Student created and linked to existing parent account"
+      });
+    } catch (error) {
+      await Student.deleteOne({ _id: student._id });
+      const statusCode =
+        error && typeof error === "object" && "statusCode" in error
+          ? Number((error as { statusCode?: number }).statusCode) || 500
+          : 500;
+      res.status(statusCode).json({
+        success: false,
+        data: null,
+        message: error instanceof Error ? error.message : "Failed to provision parent account"
+      });
+    }
   })
 );
 
@@ -330,20 +391,92 @@ studentsRouter.put(
   "/:id",
   ...scopeMiddleware,
   isSuperAdminOrOrgStaff("canManageStudents"),
+  updateStudentValidation,
+  validate,
   asyncHandler(async (req, res) => {
     const authReq = req as AuthenticatedRequest;
-    const { busId: _busId, monthlyFee: _monthlyFee, monthlyTransportFee: _mtf, ...body } =
-      req.body as Record<string, unknown>;
-    const student = await Student.findOneAndUpdate(
-      { _id: req.params.id, ...orgFilter(authReq, res) },
-      body,
-      { new: true, runValidators: true }
-    );
-    if (!student) {
+    const orgId = getScopedOrganizationId(authReq, res)!;
+    const {
+      busId: _busId,
+      monthlyFee: _monthlyFee,
+      monthlyTransportFee: _mtf,
+      parentEmail,
+      ...body
+    } = req.body as Record<string, unknown> & {
+      parentName?: string;
+      parentPhone?: string;
+      parentEmail?: string;
+    };
+
+    const existing = await Student.findOne({
+      _id: req.params.id,
+      ...orgFilter(authReq, res)
+    });
+    if (!existing) {
       res.status(404).json({ success: false, data: null, message: "Student not found" });
       return;
     }
-    res.json({ success: true, data: student, message: "Student updated successfully" });
+
+    if (typeof body.parentPhone === "string") {
+      const normalized = normalizeIndianMobile(body.parentPhone);
+      if (!normalized) {
+        res.status(400).json({
+          success: false,
+          data: null,
+          message: "Enter a valid 10-digit Indian mobile number"
+        });
+        return;
+      }
+      body.parentPhone = normalized;
+    }
+
+    const previousPhone = existing.parentPhone;
+    const previousParentUserId = existing.parentUserId;
+
+    Object.assign(existing, body);
+    await existing.save();
+
+    const nextPhone = existing.parentPhone;
+    const nextName = existing.parentName;
+    const phoneChanged = previousPhone !== nextPhone;
+
+    try {
+      if (phoneChanged) {
+        await unlinkStudentFromParent(previousParentUserId, existing._id);
+      }
+
+      const parentAccount = await ensureParentAccountForStudent({
+        organizationId: orgId,
+        studentId: existing._id,
+        parentName: nextName,
+        parentPhone: nextPhone,
+        parentEmail: typeof parentEmail === "string" ? parentEmail : undefined
+      });
+
+      existing.parentUserId = new Types.ObjectId(parentAccount.parentUserId);
+      await existing.save();
+
+      res.json({
+        success: true,
+        data: existing,
+        parentAccount,
+        message: phoneChanged
+          ? parentAccount.created
+            ? "Student updated; new parent account provisioned"
+            : "Student updated and re-linked to parent account"
+          : "Student updated successfully"
+      });
+    } catch (error) {
+      const statusCode =
+        error && typeof error === "object" && "statusCode" in error
+          ? Number((error as { statusCode?: number }).statusCode) || 500
+          : 500;
+      res.status(statusCode).json({
+        success: false,
+        data: existing,
+        message: error instanceof Error ? error.message : "Failed to sync parent account"
+      });
+    }
   })
 );
 
