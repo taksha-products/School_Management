@@ -7,6 +7,8 @@ import { useEffect, useMemo, useState } from "react";
 import { MapContainer, TileLayer, useMap, ZoomControl } from "react-leaflet";
 
 import { BusMarker } from "@/components/gps/BusMarker";
+import { BusTrail } from "@/components/gps/BusTrail";
+import { useBusTrails, TRAIL_MINUTES } from "@/hooks/useBusTrails";
 import { useGpsTracking } from "@/hooks/useGpsTracking";
 import { api } from "@/lib/api";
 import {
@@ -21,6 +23,7 @@ interface LiveBusApiRow {
   busId: string;
   busNumber: string;
   routeName: string;
+  routeNumber: string | null;
   deviceId: string | null;
   lat: number | null;
   lng: number | null;
@@ -35,6 +38,7 @@ interface BusView {
   busId: string;
   busNumber: string;
   routeName: string;
+  routeNumber: string | null;
   hasDevice: boolean;
   lat: number | null;
   lng: number | null;
@@ -89,6 +93,7 @@ export const LiveMapClient = (): JSX.Element => {
   const [hasFitted, setHasFitted] = useState(false);
   const [focus, setFocus] = useState<{ lat: number; lng: number; nonce: number } | null>(null);
   const [selectedBusId, setSelectedBusId] = useState<string | null>(null);
+  const [showTrails, setShowTrails] = useState(true);
 
   const busesQuery = useQuery({
     queryKey: ["live-buses"],
@@ -103,6 +108,8 @@ export const LiveMapClient = (): JSX.Element => {
     return () => clearInterval(timer);
   }, []);
 
+  const trails = useBusTrails(livePositions, now);
+
   const buses = useMemo<BusView[]>(() => {
     const merged = (busesQuery.data ?? []).map((row): BusView => {
       const live = livePositions.get(row.busId);
@@ -113,6 +120,7 @@ export const LiveMapClient = (): JSX.Element => {
         busId: row.busId,
         busNumber: row.busNumber,
         routeName: row.routeName,
+        routeNumber: row.routeNumber,
         hasDevice,
         lat: live?.lat ?? row.lat,
         lng: live?.lng ?? row.lng,
@@ -166,13 +174,26 @@ export const LiveMapClient = (): JSX.Element => {
         </div>
 
         {fitPoints.length > 0 && (
-          <button
-            type="button"
-            onClick={() => setFitSignal((value) => value + 1)}
-            className="absolute bottom-3 left-3 z-[1000] rounded-lg bg-white/95 px-3 py-2 text-sm font-medium shadow-md hover:bg-white"
-          >
-            Fit all buses
-          </button>
+          <div className="absolute bottom-3 left-3 z-[1000] flex gap-2">
+            <button
+              type="button"
+              onClick={() => setFitSignal((value) => value + 1)}
+              className="rounded-lg bg-white/95 px-3 py-2 text-sm font-medium shadow-md hover:bg-white"
+            >
+              Fit all buses
+            </button>
+            <button
+              type="button"
+              aria-pressed={showTrails}
+              onClick={() => setShowTrails((value) => !value)}
+              className={cn(
+                "rounded-lg px-3 py-2 text-sm font-medium shadow-md",
+                showTrails ? "bg-slate-900 text-white" : "bg-white/95 text-slate-700 hover:bg-white"
+              )}
+            >
+              {showTrails ? `Trails: last ${TRAIL_MINUTES} min` : "Show trails"}
+            </button>
+          </div>
         )}
 
         {busesQuery.isError && (
@@ -194,11 +215,28 @@ export const LiveMapClient = (): JSX.Element => {
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
           <MapController fitPoints={fitPoints} fitSignal={fitSignal} focus={focus} />
+          {showTrails &&
+            buses.map((bus) => {
+              const points = trails.get(bus.busId);
+              if (!points) {
+                return null;
+              }
+              return (
+                <BusTrail
+                  key={`trail-${bus.busId}`}
+                  points={points}
+                  color={BUS_STATUS_META[bus.status].color}
+                  highlighted={selectedBusId === bus.busId}
+                  dimmed={selectedBusId !== null && selectedBusId !== bus.busId}
+                />
+              );
+            })}
           {positioned.map((bus) => (
             <BusMarker
               key={bus.busId}
               busId={bus.busId}
               busNumber={bus.busNumber}
+              routeNumber={bus.routeNumber}
               routeName={bus.routeName}
               lat={bus.lat as number}
               lng={bus.lng as number}

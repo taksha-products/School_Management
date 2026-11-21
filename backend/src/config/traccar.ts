@@ -8,7 +8,7 @@ export interface TraccarConfig {
   timeoutMs: number;
 }
 
-const DEFAULT_TIMEOUT_MS = 8_000;
+const DEFAULT_TIMEOUT_MS = 5_000;
 
 /**
  * Reads Traccar connection settings from the environment.

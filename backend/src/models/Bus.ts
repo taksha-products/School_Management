@@ -6,6 +6,8 @@ export interface IBus extends Document {
   organizationId: Types.ObjectId;
   busNumber: string;
   routeName: string;
+  /** Short route number shown on the live map (e.g. "R5"). Optional. */
+  routeNumber?: string;
   driverName: string;
   driverPhone: string;
   capacity: number;
@@ -17,6 +19,7 @@ const busSchema = new Schema<IBus>(
     organizationId: { type: Schema.Types.ObjectId, ref: "Organization", required: true },
     busNumber: { type: String, required: true },
     routeName: { type: String, required: true },
+    routeNumber: { type: String, trim: true, maxlength: 20 },
     driverName: { type: String, required: true },
     driverPhone: { type: String, required: true },
     capacity: { type: Number, required: true },

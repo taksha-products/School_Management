@@ -1,16 +1,20 @@
 import { Bus } from "../models/Bus";
 import { GpsDevice } from "../models/GpsDevice";
+import { Student } from "../models/Student";
 import { User } from "../models/User";
 
 /**
  * Brings critical collections in line with the schema's indexes, dropping obsolete ones
  * that can break uniqueness rules (e.g. legacy global busNumber_1 on buses, the
- * non-partial traccarDeviceId_1 on gpsdevices, or the global phone_1 on users).
+ * non-partial traccarDeviceId_1 on gpsdevices, the non-partial admissionNo index on
+ * students, or the global phone_1 on users).
  */
 export const syncCriticalIndexes = async (): Promise<void> => {
   const targets = [
     { name: "Bus", sync: () => Bus.syncIndexes() },
-    { name: "GpsDevice", sync: () => GpsDevice.syncIndexes() }
+    { name: "GpsDevice", sync: () => GpsDevice.syncIndexes() },
+    // admissionNo must be unique only when present (students may be added without one).
+    { name: "Student", sync: () => Student.syncIndexes() }
   ];
 
   for (const target of targets) {

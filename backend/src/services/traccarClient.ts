@@ -32,8 +32,14 @@ export interface TraccarDevice {
   [key: string]: unknown;
 }
 
-const MAX_ATTEMPTS = 3;
-const RETRY_DELAY_MS = 300;
+/** Connection errors and 5xx are retried once; a timeout is never retried (the admin is waiting). */
+const MAX_ATTEMPTS = 2;
+const RETRY_DELAY_MS = 200;
+
+const isTimeout = (error: unknown): boolean => {
+  const code = (error as { code?: string } | null)?.code;
+  return code === "ECONNABORTED" || code === "ETIMEDOUT";
+};
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -101,6 +107,9 @@ const request = async <T>(
           throw error;
         }
         lastError = error;
+      } else if (isTimeout(error)) {
+        // Do not retry a timeout: the whole request would take attempts x timeout.
+        throw new TraccarError("unreachable", "Traccar did not respond in time");
       } else {
         lastError = new TraccarError("unreachable", "Could not reach the Traccar server");
       }
@@ -114,6 +123,29 @@ const request = async <T>(
   throw lastError ?? new TraccarError("unexpected", "Unexpected Traccar failure");
 };
 
+const isTraccarDevice = (value: unknown): value is TraccarDevice => {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.id === "number" &&
+    Number.isInteger(candidate.id) &&
+    typeof candidate.uniqueId === "string"
+  );
+};
+
+const unexpectedResponse = (): TraccarError =>
+  new TraccarError("unexpected", "Traccar returned an unexpected response");
+
+/** A list answer must be an array of well-formed devices; anything else is not Traccar talking. */
+const asDeviceList = (data: unknown): TraccarDevice[] => {
+  if (!Array.isArray(data) || !data.every(isTraccarDevice)) {
+    throw unexpectedResponse();
+  }
+  return data;
+};
+
 /** Finds a device by its unique identifier (IMEI / phone id). */
 export const findTraccarDeviceByUniqueId = async (
   uniqueId: string
@@ -122,7 +154,8 @@ export const findTraccarDeviceByUniqueId = async (
     { method: "GET", url: "/devices", params: { uniqueId } },
     { retry: true }
   );
-  return Array.isArray(data) && data.length > 0 ? (data[0] ?? null) : null;
+  const devices = asDeviceList(data);
+  return devices.length > 0 ? (devices[0] ?? null) : null;
 };
 
 export const getTraccarDevice = async (id: number): Promise<TraccarDevice | null> => {
@@ -130,7 +163,8 @@ export const getTraccarDevice = async (id: number): Promise<TraccarDevice | null
     { method: "GET", url: "/devices", params: { id } },
     { retry: true }
   );
-  return Array.isArray(data) && data.length > 0 ? (data[0] ?? null) : null;
+  const devices = asDeviceList(data);
+  return devices.length > 0 ? (devices[0] ?? null) : null;
 };
 
 /**
@@ -149,11 +183,25 @@ export const ensureTraccarDevice = async (input: {
     return existing;
   }
 
-  const { data } = await request<TraccarDevice>(
-    { method: "POST", url: "/devices", data: { name: input.name, uniqueId: input.uniqueId } },
-    { retry: false }
-  );
-  return data;
+  try {
+    const { data } = await request<unknown>(
+      { method: "POST", url: "/devices", data: { name: input.name, uniqueId: input.uniqueId } },
+      { retry: false }
+    );
+    if (!isTraccarDevice(data)) {
+      throw unexpectedResponse();
+    }
+    return data;
+  } catch (error) {
+    // Lost a race with another request creating the same device: adopt the winner's device.
+    if (error instanceof TraccarError && error.kind === "rejected") {
+      const winner = await findTraccarDeviceByUniqueId(input.uniqueId);
+      if (winner) {
+        return winner;
+      }
+    }
+    throw error;
+  }
 };
 
 /**
@@ -165,10 +213,13 @@ export const updateTraccarDevice = async (
   changes: Partial<Pick<TraccarDevice, "name" | "uniqueId" | "disabled">>
 ): Promise<TraccarDevice> => {
   const merged = { ...current, ...changes };
-  const { data } = await request<TraccarDevice>(
+  const { data } = await request<unknown>(
     { method: "PUT", url: `/devices/${current.id}`, data: merged },
     { retry: true }
   );
+  if (!isTraccarDevice(data)) {
+    throw unexpectedResponse();
+  }
   return data;
 };
 

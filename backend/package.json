@@ -12,7 +12,8 @@
     "seed": "ts-node src/seed.ts",
     "ensure-indexes": "ts-node src/scripts/ensureIndexes.ts",
     "migrate-org-grades": "ts-node src/scripts/migrateOrgGrades.ts",
-    "reset-super-admin": "ts-node src/scripts/resetSuperAdminPassword.ts"
+    "reset-super-admin": "ts-node src/scripts/resetSuperAdminPassword.ts",
+    "test": "node --require ts-node/register/transpile-only --test \"src/__tests__/*.spec.ts\""
   },
   "dependencies": {
     "axios": "^1.18.1",

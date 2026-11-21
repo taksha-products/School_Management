@@ -1,4 +1,4 @@
-import { Router, type Response } from "express";
+import { Router, type RequestHandler, type Response } from "express";
 import { Types } from "mongoose";
 
 import { auth, type AuthenticatedRequest } from "../middleware/auth";
@@ -30,10 +30,20 @@ const busesRouter = Router();
 
 const scopeMiddleware = [auth, orgScope, requireOrgScope, canAccessOrg] as const;
 
+/** A malformed id can never match a bus: answer 404 instead of letting Mongoose throw a 500. */
+const requireValidBusId: RequestHandler = (req, res, next) => {
+  if (!Types.ObjectId.isValid(String(req.params.id))) {
+    res.status(404).json({ success: false, data: null, message: "Bus not found" });
+    return;
+  }
+  next();
+};
+
 /** Fields an admin may change on a bus (everything else in the body is ignored). */
 const UPDATABLE_BUS_FIELDS = [
   "busNumber",
   "routeName",
+  "routeNumber",
   "driverName",
   "driverPhone",
   "capacity",
@@ -49,6 +59,9 @@ const pickBusUpdates = (body: Record<string, unknown>): Record<string, unknown> 
   }
   if (typeof updates.busNumber === "string") {
     updates.busNumber = updates.busNumber.trim();
+  }
+  if (typeof updates.routeNumber === "string") {
+    updates.routeNumber = updates.routeNumber.trim();
   }
   return updates;
 };
@@ -120,6 +133,7 @@ busesRouter.get(
           organizationId: 1,
           busNumber: 1,
           routeName: 1,
+          routeNumber: 1,
           driverName: 1,
           driverPhone: 1,
           capacity: 1,
@@ -157,6 +171,7 @@ busesRouter.get(
 busesRouter.get(
   "/:id",
   ...scopeMiddleware,
+  requireValidBusId,
   (req, res, next) => {
     const authReq = req as AuthenticatedRequest;
     if (authReq.user?.role === "superAdmin") {
@@ -257,6 +272,7 @@ busesRouter.post(
 busesRouter.put(
   "/:id",
   ...scopeMiddleware,
+  requireValidBusId,
   isSuperAdminOrOrgStaff("canManageBuses"),
   updateBusValidation,
   validate,
@@ -327,6 +343,7 @@ busesRouter.put(
 busesRouter.post(
   "/:id/tracker/sync",
   ...scopeMiddleware,
+  requireValidBusId,
   isSuperAdminOrOrgStaff("canManageBuses"),
   asyncHandler(async (req, res) => {
     const authReq = req as AuthenticatedRequest;

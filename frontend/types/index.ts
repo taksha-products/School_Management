@@ -2,6 +2,8 @@ export interface Bus {
   _id: string;
   busNumber: string;
   routeName: string;
+  /** Short route number shown on the live map, e.g. "R5". */
+  routeNumber?: string;
   driverName: string;
   driverPhone: string;
   capacity: number;
@@ -21,6 +23,8 @@ export interface BusTracker {
 }
 
 export interface StudentTransportInfo {
+  /** Parent view: the school has live bus tracking switched on for parents. */
+  trackingEnabled?: boolean;
   busId?: string;
   busNumber?: string;
   routeName?: string;

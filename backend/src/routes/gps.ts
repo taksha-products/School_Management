@@ -10,15 +10,13 @@ import { Bus } from "../models/Bus";
 import { GpsDevice } from "../models/GpsDevice";
 import { GpsLog } from "../models/GpsLog";
 import { publishGpsPositionUpdate } from "../services/gpsPubSub";
-import type { LiveBusPosition, LiveBusRow, LiveBusStatus } from "../types/gps";
-import {
-  knotsToKmh,
-  parseTraccarPositionForwarderPayload,
-  resolveTraccarEventTime
-} from "../types/gps";
+import { ingestPosition, MAX_FUTURE_SKEW_MS } from "../services/positionIngest";
+import type { BusTrail, LiveBusPosition, LiveBusRow, LiveBusStatus, TrailPoint } from "../types/gps";
+import { parseTraccarPositionForwarderPayload } from "../types/gps";
 import { asyncHandler } from "../utils/asyncHandler";
 import { getCached, orgCacheKey, setCached } from "../utils/cache";
 import { getScopedOrganizationId, orgFilter } from "../utils/orgFilter";
+import { thinTrail } from "../utils/trail";
 import { paginate, parsePaginationQuery } from "../utils/paginate";
 
 const LIVE_POSITIONS_TTL_SECONDS = 10;
@@ -27,6 +25,11 @@ const OFFLINE_AFTER_MS = 2 * 60 * 1000;
 /** Above this speed (km/h) a bus counts as moving. */
 const MOVING_SPEED_KMH = 1;
 
+const TRAIL_DEFAULT_MINUTES = 30;
+const TRAIL_MIN_MINUTES = 5;
+const TRAIL_MAX_MINUTES = 120;
+/** Upper bound on log rows read per request, to protect the database. */
+const TRAIL_MAX_LOG_ROWS = 8_000;
 const scopeMiddleware = [auth, orgScope, requireOrgScope, canAccessOrg] as const;
 
 const requireOrgAdminOrSuper = (
@@ -49,9 +52,10 @@ traccarWebhookRouter.post(
   asyncHandler(async (req, res) => {
     const body: unknown = req.body;
 
+    // Always answer 200 once the secret is verified: the forwarder must not retry positions we
+    // deliberately ignore (no fix, unknown device, glitches), and a failure here must not break it.
     try {
       const position = parseTraccarPositionForwarderPayload(body);
-
       if (!position) {
         // eslint-disable-next-line no-console
         console.warn("Traccar webhook: unrecognised payload shape");
@@ -59,73 +63,30 @@ traccarWebhookRouter.post(
         return;
       }
 
-      if (position.valid !== true) {
-        res.status(200).json({ success: true });
-        return;
-      }
+      const outcome = await ingestPosition(position, body);
 
-      const device = await GpsDevice.findOne({
-        traccarDeviceId: position.deviceId,
-        isActive: true
-      });
-      if (!device) {
+      if (outcome.status === "ignored" && outcome.reason !== "no GPS fix") {
         // eslint-disable-next-line no-console
-        console.warn("Traccar webhook: unknown device", {
-          traccarDeviceId: position.deviceId
+        console.warn("Traccar webhook: position ignored", {
+          traccarDeviceId: position.deviceId,
+          reason: outcome.reason
         });
-        res.status(200).json({ success: true });
-        return;
       }
 
-      const speedKmh = knotsToKmh(position.speed);
-      const bearing = position.course;
-      const accuracy = position.accuracy ?? 0;
-      const batteryLevel =
-        position.attributes?.batteryLevel !== undefined
-          ? position.attributes.batteryLevel
-          : device.batteryLevel;
-      const satellites = position.attributes?.satellites;
-      const eventTime = resolveTraccarEventTime(position);
-
-      await GpsLog.create({
-        organizationId: device.organizationId,
-        deviceId: device._id,
-        busId: device.busId,
-        lat: position.latitude,
-        lng: position.longitude,
-        speed: speedKmh,
-        bearing,
-        accuracy: position.accuracy,
-        altitude: position.altitude,
-        satellites,
-        traccarEventTime: eventTime,
-        rawPayload: body
-      });
-
-      device.lastSeen = eventTime;
-      device.lastLat = position.latitude;
-      device.lastLng = position.longitude;
-      device.lastSpeed = speedKmh;
-      device.lastBearing = bearing;
-      device.lastAccuracy = position.accuracy;
-      if (batteryLevel !== undefined && !Number.isNaN(batteryLevel)) {
-        device.batteryLevel = Math.min(100, Math.max(0, batteryLevel));
+      if (outcome.status === "updated") {
+        await publishGpsPositionUpdate(outcome.organizationId, {
+          type: "position_update",
+          deviceId: outcome.deviceId,
+          busId: outcome.busId,
+          organizationId: outcome.organizationId,
+          lat: outcome.position.lat,
+          lng: outcome.position.lng,
+          speed: outcome.position.speedKmh,
+          bearing: outcome.position.bearing,
+          accuracy: outcome.position.accuracy ?? 0,
+          timestamp: outcome.position.eventTime.toISOString()
+        });
       }
-      await device.save();
-
-      const orgId = device.organizationId.toString();
-      await publishGpsPositionUpdate(orgId, {
-        type: "position_update",
-        deviceId: device._id.toString(),
-        busId: device.busId.toString(),
-        organizationId: orgId,
-        lat: position.latitude,
-        lng: position.longitude,
-        speed: speedKmh,
-        bearing,
-        accuracy,
-        timestamp: eventTime.toISOString()
-      });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       // eslint-disable-next-line no-console
@@ -163,7 +124,8 @@ const deriveTrackingStatus = (row: LiveBusRow, now: number): LiveBusStatus => {
     return "offline";
   }
   const age = now - new Date(row.lastSeen).getTime();
-  if (Number.isNaN(age) || age > OFFLINE_AFTER_MS) {
+  // A last position far in the future (device clock was wrong) is not a live signal.
+  if (Number.isNaN(age) || age > OFFLINE_AFTER_MS || age < -MAX_FUTURE_SKEW_MS) {
     return "offline";
   }
   return (row.speed ?? 0) > MOVING_SPEED_KMH ? "live" : "stopped";
@@ -184,7 +146,7 @@ gpsRouter.get(
       const filter = orgFilter(authReq, res);
       const [buses, devices] = await Promise.all([
         Bus.find({ ...filter, status: "active" })
-          .select("busNumber routeName")
+          .select("busNumber routeName routeNumber")
           .sort({ busNumber: 1 })
           .lean(),
         GpsDevice.find({ ...filter, isActive: true }).lean()
@@ -198,6 +160,7 @@ gpsRouter.get(
           busId: String(bus._id),
           busNumber: bus.busNumber,
           routeName: bus.routeName,
+          routeNumber: bus.routeNumber?.trim() || null,
           deviceId: device ? String(device._id) : null,
           lat: device?.lastLat ?? null,
           lng: device?.lastLng ?? null,
@@ -222,6 +185,51 @@ gpsRouter.get(
       success: true,
       data,
       message: "Live bus positions fetched successfully"
+    });
+  })
+);
+
+gpsRouter.get(
+  "/buses/trails",
+  ...scopeMiddleware,
+  requireStaffLevelAccess,
+  asyncHandler(async (req, res) => {
+    const authReq = req as AuthenticatedRequest;
+
+    const requested = Number(req.query.minutes);
+    const minutes = Number.isFinite(requested)
+      ? Math.min(TRAIL_MAX_MINUTES, Math.max(TRAIL_MIN_MINUTES, Math.round(requested)))
+      : TRAIL_DEFAULT_MINUTES;
+    const since = new Date(Date.now() - minutes * 60_000);
+
+    // Newest first so the row cap trims the oldest points, then reversed per bus below.
+    const logs = await GpsLog.find({
+      ...orgFilter(authReq, res),
+      traccarEventTime: { $gte: since }
+    })
+      .sort({ traccarEventTime: -1 })
+      .limit(TRAIL_MAX_LOG_ROWS)
+      .select("busId lat lng traccarEventTime")
+      .lean();
+
+    const byBus = new Map<string, TrailPoint[]>();
+    for (const log of logs) {
+      const key = String(log.busId);
+      const list = byBus.get(key) ?? [];
+      list.push([log.lat, log.lng, log.traccarEventTime.getTime()]);
+      byBus.set(key, list);
+    }
+
+    const data: BusTrail[] = [];
+    for (const [busId, newestFirst] of byBus) {
+      const chronological = newestFirst.reverse();
+      data.push({ busId, points: thinTrail(chronological) });
+    }
+
+    res.json({
+      success: true,
+      data,
+      message: "Bus trails fetched successfully"
     });
   })
 );

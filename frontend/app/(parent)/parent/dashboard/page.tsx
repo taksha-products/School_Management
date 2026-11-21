@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 
 import { useAcademicYear } from "@/hooks/useAcademicYear";
+import { TrackBusLink } from "@/components/parent/TrackBusLink";
 import { Card } from "@/components/ui/Card";
 import { api } from "@/lib/api";
 import { formatINR } from "@/lib/utils";
@@ -29,6 +30,9 @@ const ParentDashboardPage = (): JSX.Element => {
             <p className="mt-2 text-sm text-amber-600">View dues & payments →</p>
           </Card>
         </Link>
+        {children[0].transport?.trackingEnabled && (
+          <TrackBusLink studentId={children[0]._id} busNumber={children[0].transport.busNumber} />
+        )}
       </div>
     );
   }
@@ -61,6 +65,7 @@ const ChildBalanceCard = ({ child }: { child: Student }): JSX.Element => {
   const balance = feesQuery.data?.summary.outstandingBalance ?? 0;
 
   return (
+    <div>
     <Link href={`/parent/child/${child._id}`}>
       <Card className="transition hover:border-amber-400 hover:shadow-md">
         <p className="text-lg font-semibold">{child.name}</p>
@@ -73,6 +78,10 @@ const ChildBalanceCard = ({ child }: { child: Student }): JSX.Element => {
         <p className="text-xs text-slate-500">Outstanding</p>
       </Card>
     </Link>
+    {child.transport?.trackingEnabled && (
+      <TrackBusLink studentId={child._id} busNumber={child.transport.busNumber} />
+    )}
+    </div>
   );
 };
 

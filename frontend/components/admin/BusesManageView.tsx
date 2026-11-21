@@ -24,6 +24,7 @@ const TRACKER_ID_PATTERN = /^[A-Za-z0-9._:-]{3,64}$/;
 const busSchema = z.object({
   busNumber: z.string().min(1),
   routeName: z.string().min(1),
+  routeNumber: z.string().trim().max(20, "At most 20 characters").optional(),
   driverName: z.string().min(1),
   driverPhone: z.string().min(10),
   capacity: z.coerce.number().min(1),
@@ -168,6 +169,7 @@ export const BusesManageView = (): JSX.Element => {
               <thead className="text-left text-slate-500">
                 <tr>
                   <th>Bus Number</th>
+                  <th>Route no.</th>
                   <th>Route</th>
                   <th>Driver</th>
                   <th>Capacity</th>
@@ -181,6 +183,7 @@ export const BusesManageView = (): JSX.Element => {
                 {(busesQuery.data ?? []).map((bus) => (
                   <tr key={bus._id} className="border-t border-slate-100">
                     <td className="py-2">{bus.busNumber}</td>
+                    <td className="font-semibold">{bus.routeNumber || "—"}</td>
                     <td>{bus.routeName}</td>
                     <td>{bus.driverName}</td>
                     <td>{bus.capacity}</td>
@@ -212,6 +215,7 @@ export const BusesManageView = (): JSX.Element => {
                           form.reset({
                             busNumber: bus.busNumber,
                             routeName: bus.routeName,
+                            routeNumber: bus.routeNumber ?? "",
                             driverName: bus.driverName,
                             driverPhone: bus.driverPhone,
                             capacity: bus.capacity,
@@ -279,6 +283,24 @@ export const BusesManageView = (): JSX.Element => {
               className="rounded border border-slate-200 px-3 py-2"
             />
           ))}
+          <div className="grid gap-1">
+            <label htmlFor="routeNumber" className="text-sm font-medium text-slate-700">
+              Route number <span className="font-normal text-slate-400">(optional)</span>
+            </label>
+            <input
+              id="routeNumber"
+              placeholder="e.g. Route 5 or R5"
+              autoComplete="off"
+              {...form.register("routeNumber")}
+              className="rounded border border-slate-200 px-3 py-2"
+            />
+            <p className="text-xs text-slate-500">
+              Shown on the live map and to parents instead of the registration number.
+            </p>
+            {form.formState.errors.routeNumber && (
+              <p className="text-xs text-rose-500">{form.formState.errors.routeNumber.message}</p>
+            )}
+          </div>
           <input
             type="number"
             placeholder="capacity"

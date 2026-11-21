@@ -54,9 +54,11 @@ const gpsDeviceSchema = new Schema<IGpsDevice>(
 gpsDeviceSchema.index({ organizationId: 1, busId: 1 }, { unique: true });
 gpsDeviceSchema.index({ traccarUniqueId: 1 }, { unique: true });
 // Unique only once a Traccar id has been assigned (devices awaiting sync have none).
+// `$exists: true` (not `$type`) so the planner can use this index for the webhook's
+// equality lookup by Traccar id.
 gpsDeviceSchema.index(
   { traccarDeviceId: 1 },
-  { unique: true, partialFilterExpression: { traccarDeviceId: { $type: "number" } } }
+  { unique: true, partialFilterExpression: { traccarDeviceId: { $exists: true } } }
 );
 gpsDeviceSchema.index({ organizationId: 1, isActive: 1 });
 

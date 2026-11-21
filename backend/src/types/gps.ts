@@ -40,11 +40,20 @@ export interface GpsPositionUpdateMessage {
 
 export type LiveBusStatus = "live" | "stopped" | "offline" | "no_device";
 
+/** A recent track point: [latitude, longitude, epoch milliseconds]. */
+export type TrailPoint = [number, number, number];
+
+export interface BusTrail {
+  busId: string;
+  points: TrailPoint[];
+}
+
 /** One active bus with its last known position (cached; status is derived per request). */
 export interface LiveBusRow {
   busId: string;
   busNumber: string;
   routeName: string;
+  routeNumber: string | null;
   deviceId: string | null;
   lat: number | null;
   lng: number | null;

@@ -72,6 +72,25 @@ interface BusRef {
 
 const deviceName = (bus: BusRef): string => `Bus ${bus.busNumber}`;
 
+const isDuplicateKeyError = (error: unknown): boolean =>
+  (error as { code?: number } | null)?.code === 11000;
+
+/**
+ * Saves the device row, turning a unique-index violation into a clean conflict. Doing this
+ * BEFORE calling Traccar means concurrent requests for the same tracker ID are settled by the
+ * database, and the loser never touches Traccar.
+ */
+const claimTracker = async (device: IGpsDevice): Promise<void> => {
+  try {
+    await device.save();
+  } catch (error) {
+    if (isDuplicateKeyError(error)) {
+      throw new TrackerConflictError();
+    }
+    throw error;
+  }
+};
+
 const safeErrorMessage = (error: unknown): string => {
   if (error instanceof TraccarError) {
     return error.message;
@@ -216,6 +235,7 @@ export const syncBusTracker = async (params: {
     device.lastSeen = undefined;
   }
 
+  await claimTracker(device);
   await pushToTraccar(device, bus);
   return toTrackerView(device);
 };
