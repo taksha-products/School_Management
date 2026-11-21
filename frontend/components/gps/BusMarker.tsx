@@ -1,9 +1,10 @@
 "use client";
 
 import L from "leaflet";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Marker, Popup, useMap, useMapEvents } from "react-leaflet";
 
+import { useSmoothMarker } from "@/hooks/useSmoothMarker";
 import { BUS_STATUS_META, formatLastSeen, type LiveBusStatus } from "@/lib/busTracking";
 
 /** Top-down school bus, nose pointing up (north). Optimised from the supplied artwork. */
@@ -13,13 +14,20 @@ const BUS_ASPECT = 250 / 96;
 
 /** Bus width in px per zoom level, so buses stay readable zoomed out and detailed zoomed in. */
 const busWidthForZoom = (zoom: number): number => {
-  if (zoom <= 11) return 14;
-  if (zoom === 12) return 17;
-  if (zoom === 13) return 21;
-  if (zoom === 14) return 25;
-  if (zoom === 15) return 30;
-  return 36;
+  if (zoom <= 11) return 13;
+  if (zoom === 12) return 15;
+  if (zoom === 13) return 18;
+  if (zoom === 14) return 21;
+  if (zoom === 15) return 24;
+  return 30;
 };
+
+/** How long a turn of the bus takes; the rotation glides instead of snapping. */
+const TURN_MS = 900;
+
+/** Rotation that reaches `target` from `current` by the shortest way (never spins the long way round). */
+const nearestAngle = (current: number, target: number): number =>
+  current + ((((target - current) % 360) + 540) % 360) - 180;
 
 const Z_OFFSET: Record<LiveBusStatus, number> = {
   live: 300,
@@ -73,7 +81,7 @@ const createBusDivIcon = (options: BusIconOptions): L.DivIcon => {
 
   const html = `
     <div style="position:relative;width:${boxWidth}px;height:${boxHeight}px;font-family:Inter,system-ui,sans-serif;">
-      <div class="bus-marker__hit" style="position:absolute;left:${centerX - busWidth / 2}px;top:${centerY - busHeight / 2}px;width:${busWidth}px;height:${busHeight}px;transform:rotate(${bearing}deg) scale(${scale});transform-origin:center;opacity:${offline ? 0.85 : 1};">
+      <div class="bus-marker__hit bus-marker__rot" data-angle="${bearing}" data-scale="${scale}" style="position:absolute;left:${centerX - busWidth / 2}px;top:${centerY - busHeight / 2}px;width:${busWidth}px;height:${busHeight}px;transform:rotate(${bearing}deg) scale(${scale});transform-origin:center;transition:transform ${TURN_MS}ms linear;opacity:${offline ? 0.85 : 1};">
         <img src="${BUS_IMAGE_SRC}" alt="" width="${busWidth}" height="${busHeight}" draggable="false" style="display:block;width:100%;height:100%;filter:${imageFilter};" />
       </div>
       <div class="bus-marker__hit" style="position:absolute;left:0;right:0;top:${tagTop}px;display:flex;justify-content:center;">
@@ -103,6 +111,8 @@ export interface BusMarkerProps {
   status: LiveBusStatus;
   selected?: boolean;
   onSelect?: (busId: string) => void;
+  /** Called for every displayed position while the bus glides (the map follows it, the trail ends at it). */
+  onFrame?: (lat: number, lng: number) => void;
 }
 
 export const BusMarker = ({
@@ -117,34 +127,60 @@ export const BusMarker = ({
   timestamp,
   status,
   selected = false,
-  onSelect
+  onSelect,
+  onFrame
 }: BusMarkerProps): JSX.Element => {
   const map = useMap();
   const [zoom, setZoom] = useState(() => map.getZoom());
   useMapEvents({ zoomend: () => setZoom(map.getZoom()) });
 
+  const markerRef = useRef<L.Marker | null>(null);
+  // The marker is moved by useSmoothMarker; the position prop only places it the first time.
+  const startPosition = useRef<[number, number]>([lat, lng]);
+  useSmoothMarker(markerRef, lat, lng, onFrame);
+
   const meta = BUS_STATUS_META[status];
   const busWidth = busWidthForZoom(zoom);
-  // Round so tiny heading jitter does not rebuild the marker on every update.
+  // Round so tiny heading jitter does not turn the bus on every update.
   const tagText = routeNumber?.trim() || busNumber;
   const roundedBearing = Math.round(bearing / 5) * 5;
+
+  // The icon is rebuilt only for things that change its look. A new heading turns the existing
+  // bus (below), so the turn is animated instead of the bus being replaced.
+  const bearingRef = useRef(roundedBearing);
+  bearingRef.current = roundedBearing;
 
   const icon = useMemo(
     () =>
       createBusDivIcon({
         tagText,
         color: meta.color,
-        bearing: roundedBearing,
+        bearing: bearingRef.current,
         busWidth,
         offline: status === "offline",
         selected
       }),
-    [tagText, meta.color, roundedBearing, busWidth, status, selected]
+    [tagText, meta.color, busWidth, status, selected]
   );
+
+  useEffect(() => {
+    const element = markerRef.current?.getElement()?.querySelector<HTMLElement>(".bus-marker__rot");
+    if (!element) {
+      return;
+    }
+    const current = Number(element.dataset.angle ?? roundedBearing);
+    const next = nearestAngle(current, roundedBearing);
+    if (next === current) {
+      return;
+    }
+    element.dataset.angle = String(next);
+    element.style.transform = `rotate(${next}deg) scale(${element.dataset.scale ?? 1})`;
+  }, [roundedBearing, icon]);
 
   return (
     <Marker
-      position={[lat, lng]}
+      ref={markerRef}
+      position={startPosition.current}
       icon={icon}
       title={routeNumber?.trim() ? `${routeNumber.trim()} · Bus ${busNumber}` : `Bus ${busNumber}`}
       zIndexOffset={Z_OFFSET[status] + (selected ? SELECTED_Z_OFFSET : 0)}
