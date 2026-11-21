@@ -75,7 +75,14 @@ export const initSocketServer = (httpServer: HttpServer): SocketServer => {
   });
 
   io.on("connection", (socket: Socket) => {
-    const { organizationId } = socket.data;
+    const { organizationId, role } = socket.data;
+
+    // Only school staff may watch the whole fleet. Parents get no live data here until
+    // a per-child subscription (scoped to their children's buses) is added.
+    const canViewFleet = role === "orgAdmin" || role === "staff" || role === "superAdmin";
+    if (!canViewFleet) {
+      return;
+    }
 
     socket.join(`org:${organizationId}`);
 

@@ -5,6 +5,8 @@ import Link from "next/link";
 import { Bus, ChevronRight, CreditCard } from "lucide-react";
 
 import { useAcademicYear } from "@/hooks/useAcademicYear";
+import { LiveStateChip } from "@/components/parent/LiveStateChip";
+import { TrackBusLink } from "@/components/parent/TrackBusLink";
 import { Card } from "@/components/ui/Card";
 import { bootstrapSession, getUser } from "@/lib/auth";
 import { api } from "@/lib/api";
@@ -113,10 +115,13 @@ const ChildBalanceCard = ({ child }: { child: Student }): JSX.Element => {
             {feesQuery.isLoading ? "—" : formatINR(balance)}
           </p>
         </div>
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-primary-50 px-3 py-1.5 text-sm font-semibold text-primary">
-          <Bus className="h-4 w-4" />
-          {busLabel}
-        </span>
+        <div className="flex flex-col items-end gap-1.5">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-primary-50 px-3 py-1.5 text-sm font-semibold text-primary">
+            <Bus className="h-4 w-4" />
+            {busLabel}
+          </span>
+          <LiveStateChip state={child.transport?.liveState} />
+        </div>
       </div>
 
       <Link
@@ -126,6 +131,8 @@ const ChildBalanceCard = ({ child }: { child: Student }): JSX.Element => {
         <CreditCard className="h-4 w-4" />
         View fees &amp; pay
       </Link>
+
+      {child.transport?.trackingEnabled && <TrackBusLink studentId={child._id} />}
     </Card>
   );
 };

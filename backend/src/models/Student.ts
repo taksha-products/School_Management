@@ -40,7 +40,10 @@ studentSchema.index({ organizationId: 1, parentPhone: 1 });
 studentSchema.index({ parentUserId: 1 });
 studentSchema.index(
   { organizationId: 1, admissionNo: 1 },
-  { unique: true, sparse: true }
+  {
+    unique: true,
+    partialFilterExpression: { admissionNo: { $type: "string" } }
+  }
 );
 studentSchema.index(
   { organizationId: 1, name: "text" },

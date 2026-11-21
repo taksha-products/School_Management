@@ -2,14 +2,31 @@ export interface Bus {
   _id: string;
   busNumber: string;
   routeName: string;
+  /** Short route number shown on the live map, e.g. "R5". */
+  routeNumber?: string;
   driverName: string;
   driverPhone: string;
   capacity: number;
   status: "active" | "inactive";
   activeStudentCount?: number;
+  tracker?: BusTracker;
+}
+
+export type BusTrackerStatus = "none" | "pending" | "synced" | "failed" | "disabled";
+
+/** GPS tracker attached to a bus (managed from the platform; synced to Traccar by the API). */
+export interface BusTracker {
+  trackerId: string | null;
+  status: BusTrackerStatus;
+  error: string | null;
+  lastSeen: string | null;
 }
 
 export interface StudentTransportInfo {
+  /** Parent view: the school has live bus tracking switched on for parents. */
+  trackingEnabled?: boolean;
+  /** Parent view: coarse live state of the bus (no location), or null when unknown. */
+  liveState?: "live" | "stopped" | "not_running" | "no_tracker" | null;
   busId?: string;
   busNumber?: string;
   routeName?: string;

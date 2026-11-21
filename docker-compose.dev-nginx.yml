@@ -7,7 +7,15 @@
 #   NEXT_PUBLIC_BACKEND_URL=https://edunex.taaksha.com
 #   COOKIE_SECURE=true
 #
+# GPS tracking (Traccar), also in the server .env:
+#   TRACCAR_WEBHOOK_SECRET=<long random string>   # REQUIRED: without it the webhook refuses positions
+#   TRACCAR_TOKEN=<API token of the Traccar admin>  # created once in the Traccar web UI
+# Open the Traccar UI through an SSH tunnel (ssh -L 8082:127.0.0.1:8082 user@vm), create the
+# admin account, generate a token, then restart the backend. Allow the tracker port (5055 for the
+# Traccar Client phone app, plus your hardware's port) in the VM firewall / cloud security list.
+#
 # TLS: place Let's Encrypt files on the host (see README steps), then:
+#   docker compose -f docker-compose.dev-nginx.yml pull
 #   docker compose -f docker-compose.dev-nginx.yml up -d
 
 services:
@@ -38,6 +46,10 @@ services:
       OTP_DEBUG: ${OTP_DEBUG:-false}
       # CORS — must match browser origin exactly
       FRONTEND_URL: ${FRONTEND_URL:-https://edunex.taaksha.com}
+      # The backend reaches Traccar by service name (token/credentials come from .env).
+      # Until TRACCAR_WEBHOOK_SECRET / TRACCAR_TOKEN are set, GPS is simply inactive (positions
+      # are refused and trackers show "sync failed"); nothing else is affected.
+      TRACCAR_URL: http://traccar:8082
     volumes:
       - taksha_logos:/app/public/logos
     depends_on:
@@ -58,6 +70,25 @@ services:
     depends_on:
       - backend
 
+  # Traccar GPS server. Stock image pinned to the tested version (amd64 and arm64).
+  # Forwards every position to the backend over the internal network, with the shared secret.
+  traccar:
+    image: traccar/traccar:6.17.0
+    restart: unless-stopped
+    ports:
+      - "5055:5055"            # OsmAnd protocol (Traccar Client phone app) - open in the firewall
+      - "127.0.0.1:8082:8082"  # web UI / API - reach it through an SSH tunnel, not the internet
+    environment:
+      CONFIG_USE_ENVIRONMENT_VARIABLES: "true"
+      FORWARD_ENABLE: "true"
+      FORWARD_TYPE: "json"
+      FORWARD_URL: http://backend:5000/api/traccar-webhook/webhook/traccar?key=${TRACCAR_WEBHOOK_SECRET:-}
+    volumes:
+      - traccar_data:/opt/traccar/data
+      - traccar_logs:/opt/traccar/logs
+    depends_on:
+      - backend
+
   dev-nginx:
     image: nginx:1.27-alpine
     restart: unless-stopped
@@ -75,3 +106,5 @@ services:
 volumes:
   taksha_redis_data:
   taksha_logos:
+  traccar_data:
+  traccar_logs:

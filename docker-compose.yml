@@ -30,6 +30,9 @@ services:
       NODE_ENV: development
       COOKIE_SECURE: "false"
       OTP_DEBUG: "true"
+      # Inside compose the backend reaches Traccar by service name (overrides the host-style
+      # value in .env). The Traccar admin token/credentials still come from .env.
+      TRACCAR_URL: http://traccar:8082
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -45,6 +48,8 @@ services:
       args:
         # Container-to-container URL for Next rewrites / middleware
         BACKEND_URL: http://backend:5000
+        # Public API URL as the browser reaches it; baked into the client bundle at build time.
+        NEXT_PUBLIC_BACKEND_URL: ${NEXT_PUBLIC_BACKEND_URL:-http://localhost:5000}
     restart: unless-stopped
     ports:
       - "3000:3000"
@@ -75,6 +80,37 @@ services:
       redis:
         condition: service_healthy
 
+  # Traccar GPS server (stock image, configured through environment variables).
+  # Web UI: http://localhost:8082   Phone app (OsmAnd) port: 5055
+  # The backend registers buses' trackers here through the REST API: set TRACCAR_URL
+  # (http://traccar:8082 inside compose) and TRACCAR_TOKEN or TRACCAR_USER/TRACCAR_PASSWORD
+  # in .env. Traccar forwards positions to the backend webhook using TRACCAR_WEBHOOK_SECRET.
+  traccar:
+    # Pinned to the version this integration was tested against; upgrade deliberately.
+    image: traccar/traccar:6.17.0
+    container_name: traccar
+    restart: unless-stopped
+    ports:
+      - "8082:8082"   # web UI + REST API
+      - "5055:5055"   # OsmAnd protocol (Traccar Client phone app)
+      - "5027:5027"   # GPS hardware protocol port (add the port your device model uses)
+    environment:
+      CONFIG_USE_ENVIRONMENT_VARIABLES: "true"
+      FORWARD_ENABLE: "true"
+      FORWARD_TYPE: "json"   # POST JSON (not the URL-template GET mode)
+      # Default targets a backend running on the host (npm run dev). When the backend runs
+      # in this compose file, set TRACCAR_FORWARD_URL=http://backend:5000/api/traccar-webhook/webhook/traccar
+      FORWARD_URL: ${TRACCAR_FORWARD_URL:-http://host.docker.internal:5000/api/traccar-webhook/webhook/traccar}?key=${TRACCAR_WEBHOOK_SECRET:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - traccar-data:/opt/traccar/data
+      - traccar-logs:/opt/traccar/logs
+
 volumes:
   taksha_redis_data:
   taksha_logos:
+  traccar-data:
+    name: traccar-data
+  traccar-logs:
+    name: traccar-logs

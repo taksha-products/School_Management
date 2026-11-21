@@ -155,3 +155,13 @@ body {
     print-color-adjust: exact !important;
   }
 }
+
+/* Live tracking bus markers: the marker box is transparent to the pointer so overlapping
+   boxes of nearby buses never block each other; only the bus drawing itself is clickable. */
+.leaflet-marker-icon.bus-marker {
+  pointer-events: none;
+}
+.bus-marker .bus-marker__hit {
+  pointer-events: auto;
+  cursor: pointer;
+}

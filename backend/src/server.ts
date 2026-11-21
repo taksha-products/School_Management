@@ -2,7 +2,7 @@ import compression from "compression";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import express from "express";
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import mongoSanitize from "express-mongo-sanitize";
 import helmet from "helmet";
 import hpp from "hpp";
@@ -38,6 +38,7 @@ import { auth, type AuthenticatedRequest } from "./middleware/auth";
 import { require2FA } from "./middleware/require2FA";
 import { orgScope } from "./middleware/orgScope";
 import { requireOrgScope } from "./middleware/requireOrgScope";
+import { verifyAccessToken } from "./utils/jwt";
 import path from "path";
 
 import { ensureLogosDir } from "./utils/logoStorage";
@@ -80,16 +81,61 @@ app.use((req, _res, next) => {
   next();
 });
 
+const TOO_MANY = { success: false, message: "Too many requests, please try again later." };
+
+const pathOf = (req: express.Request): string => req.originalUrl.split("?")[0] ?? "";
+
+/** Orchestrator / load balancer probes: never limited. */
+const isHealthPath = (req: express.Request): boolean => pathOf(req) === "/api/health";
+
+/** Traccar's forwarder: one server posting every few seconds; guarded by its secret and a failure lockout. */
+const isWebhookPath = (req: express.Request): boolean =>
+  pathOf(req).startsWith("/api/traccar-webhook/");
+
+/** Live tracking is polled every few seconds by design (admin map, parent bus page). */
+const isTrackingPollPath = (req: express.Request): boolean => {
+  const path = pathOf(req);
+  return (
+    path.startsWith("/api/gps/buses/") || /^\/api\/parent\/children\/[^/]+\/bus(\/trail)?$/.test(path)
+  );
+};
+
+/** Limits per signed-in user (not per IP: parents share carrier/school NAT addresses). */
+const userOrIpKey = (req: express.Request): string => {
+  const token: unknown = req.cookies?.access_token;
+  if (typeof token === "string" && token) {
+    try {
+      return `user:${verifyAccessToken(token).userId}`;
+    } catch {
+      // Invalid token: fall through to the IP so rotating fake tokens does not dodge the limit.
+    }
+  }
+  return `ip:${ipKeyGenerator(req.ip ?? "")}`;
+};
+
+// General limit per IP for everything except the endpoints below, which have their own rules.
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 200,
-  message: { success: false, message: "Too many requests, please try again later." },
+  message: TOO_MANY,
   standardHeaders: true,
-  legacyHeaders: false
+  legacyHeaders: false,
+  skip: (req) => isHealthPath(req) || isWebhookPath(req) || isTrackingPollPath(req)
+});
+
+// Polling endpoints: 60 requests a minute per user (a page polls about 7 a minute).
+const trackingLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  message: TOO_MANY,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: userOrIpKey,
+  skip: (req) => !isTrackingPollPath(req)
 });
 
 if (process.env.NODE_ENV === "production") {
-  app.use("/api/", apiLimiter);
+  app.use("/api/", apiLimiter, trackingLimiter);
 }
 
 ensureLogosDir();
