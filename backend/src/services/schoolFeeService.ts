@@ -1,16 +1,20 @@
 import { Types } from "mongoose";
 
+import { Bus } from "../models/Bus";
 import { FeeLedger } from "../models/FeeLedger";
 import { SchoolFeePayment } from "../models/SchoolFeePayment";
 import { Student } from "../models/Student";
-import { StudentTransport } from "../models/StudentTransport";
 import { StudentFeeAssignment } from "../models/StudentFeeAssignment";
+import { StudentTransport } from "../models/StudentTransport";
 import {
   formatMonthDisplay,
   periodMatchesMonth,
   refreshOverdueStatuses
 } from "../utils/schoolFeeLedger";
 import { getOrgReceiptBranding } from "./orgThemeService";
+
+// Ensure Bus is registered before transport.busId populate runs.
+void Bus;
 
 export interface StudentFeeStatusEntry {
   balance: number;
@@ -300,6 +304,22 @@ export const buildStudentFeeLedgerView = async (
       balance: Math.max(0, e.amountDue + e.lateFee - e.amountPaid)
     }));
 
+  const populatedBus = transport?.busId as
+    | { busNumber?: string; routeName?: string }
+    | Types.ObjectId
+    | null
+    | undefined;
+  const busDetails =
+    populatedBus && typeof populatedBus === "object" && "busNumber" in populatedBus
+      ? {
+          busNumber: populatedBus.busNumber ?? undefined,
+          routeName: populatedBus.routeName ?? undefined,
+          monthlyTransportFee: transport?.monthlyTransportFee,
+          pickupStop: transport?.pickupStop,
+          dropStop: transport?.dropStop
+        }
+      : null;
+
   return {
     student: {
       _id: student._id,
@@ -307,7 +327,7 @@ export const buildStudentFeeLedgerView = async (
       grade: student.grade,
       parentName: student.parentName,
       parentPhone: student.parentPhone,
-      bus: transport?.busId ?? null
+      bus: busDetails
     },
     assignment,
     feeHeads: Array.from(byFeeHead.values()),

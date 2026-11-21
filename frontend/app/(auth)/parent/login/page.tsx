@@ -29,6 +29,7 @@ type LoginUserPayload = {
   id: string;
   name: string;
   email?: string;
+  phone?: string;
   role: UserRole;
   organizationId: string | null;
 };
@@ -171,10 +172,10 @@ const ParentLoginPage = (): JSX.Element => {
             Choose school
           </p>
           <h2 className="mt-2 text-[26px] font-semibold leading-[1.1] tracking-[-1.2px] text-[#171717] md:text-[30px]">
-            Select a school
+            Choose your school
           </h2>
           <p className="mt-2 text-[14px] text-[#737373]">
-            This mobile number is linked to more than one school. Pick where you want to continue.
+            This mobile number is linked to more than one school.
           </p>
           <div className="mt-6 space-y-3">
             {schools.map((school) => (
@@ -186,9 +187,9 @@ const ParentLoginPage = (): JSX.Element => {
                 className="w-full rounded-[12px] border border-[#E5E5E5] bg-white px-4 py-3 text-left transition hover:border-[#F97316] hover:bg-[#FFF7ED] disabled:opacity-60"
               >
                 <p className="text-sm font-semibold text-[#171717]">{school.orgName}</p>
-                <p className="mt-1 text-xs text-[#737373]">
+                  <p className="mt-1 text-xs text-[#737373]">
                   {school.children.length > 0
-                    ? school.children.map((c) => `${c.name} (Gr ${c.grade})`).join(" · ")
+                    ? school.children.map((c) => `${c.name} · Gr ${c.grade}`).join(" · ")
                     : "No active children listed"}
                 </p>
               </button>
@@ -201,10 +202,10 @@ const ParentLoginPage = (): JSX.Element => {
             Parent login
           </p>
           <h2 className="mt-2 text-[26px] font-semibold leading-[1.1] tracking-[-1.2px] text-[#171717] md:text-[30px]">
-            Enter OTP
+            Enter verification code
           </h2>
           <p className="mt-2 text-[14px] text-[#737373]">
-            We sent a 6-digit code to <span className="font-medium text-[#171717]">+91 {phone}</span>
+            Code sent to <span className="font-medium text-[#171717]">+91 {phone}</span>
           </p>
 
           <div className="mt-6 space-y-4">
@@ -243,17 +244,17 @@ const ParentLoginPage = (): JSX.Element => {
             Parent login
           </p>
           <h2 className="mt-2 text-[26px] font-semibold leading-[1.1] tracking-[-1.2px] text-[#171717] md:text-[30px] lg:text-[34px]">
-            Sign in with mobile
+            Welcome, parent
           </h2>
           <p className="mt-2 text-[14px] leading-snug text-[#737373] md:text-[15px]">
-            Use your registered mobile number. Email login is not available for parents.
+            Sign in with your registered mobile number. No email needed.
           </p>
 
           <form
             className="mt-6 space-y-4 md:mt-7"
             onSubmit={handleSubmit(
               (data) => requestOtpMutation.mutate(data.phone),
-              () => showToast("error", "Enter a valid 10-digit mobile number")
+              () => showToast("error", "Enter a valid 10-digit Indian mobile number")
             )}
           >
             <div>
@@ -263,19 +264,25 @@ const ParentLoginPage = (): JSX.Element => {
               >
                 Mobile number
               </label>
-              <input
-                id="parent-phone"
-                type="tel"
-                inputMode="numeric"
-                autoComplete="tel"
-                {...register("phone")}
-                className={cn(
-                  LOGIN_INPUT_CLASS,
-                  errors.phone && "border-red-500 focus:border-red-500 focus:ring-red-500/15"
-                )}
-                placeholder="10-digit mobile number"
-                maxLength={10}
-              />
+              <div className="flex gap-2">
+                <span className="flex h-[50px] shrink-0 items-center rounded-[9px] border border-[#E5E5E5] bg-[#FAFAFA] px-3 text-sm font-medium text-[#171717] md:h-[52px]">
+                  +91
+                </span>
+                <input
+                  id="parent-phone"
+                  type="tel"
+                  inputMode="numeric"
+                  autoComplete="tel"
+                  {...register("phone")}
+                  className={cn(
+                    LOGIN_INPUT_CLASS,
+                    "flex-1",
+                    errors.phone && "border-red-500 focus:border-red-500 focus:ring-red-500/15"
+                  )}
+                  placeholder="10-digit mobile number"
+                  maxLength={10}
+                />
+              </div>
               {errors.phone && (
                 <p className="mt-1.5 text-xs text-red-600">{errors.phone.message}</p>
               )}

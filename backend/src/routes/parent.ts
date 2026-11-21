@@ -5,6 +5,7 @@ import { orgScope } from "../middleware/orgScope";
 import { requireOrgScope } from "../middleware/requireOrgScope";
 import { isOrgFeatureEnabled, requireFeature } from "../middleware/featureFlag";
 import { canAccessOrg, isParent } from "../middleware/roleCheck";
+import { Bus } from "../models/Bus";
 import { SchoolFeePayment } from "../models/SchoolFeePayment";
 import { Student } from "../models/Student";
 import { StudentTransport } from "../models/StudentTransport";
@@ -14,15 +15,18 @@ import {
   resolveOwnedChild
 } from "../services/parentBusService";
 import {
-  buildReceiptView,
-  buildStudentFeeLedgerView
-} from "../services/schoolFeeService";
-import {
   createSchoolPaymentIntent,
   type SchoolPaymentLineBody
 } from "../services/schoolFeeCollection";
+import {
+  buildReceiptView,
+  buildStudentFeeLedgerView
+} from "../services/schoolFeeService";
 import { asyncHandler } from "../utils/asyncHandler";
 import { getScopedOrganizationId, orgFilter } from "../utils/orgFilter";
+
+// Ensure Bus is registered for transport.busId populate.
+void Bus;
 
 const parentRouter = Router();
 
@@ -72,6 +76,7 @@ parentRouter.get(
               routeName: bus?.routeName,
               monthlyTransportFee: transport.monthlyTransportFee,
               pickupStop: transport.pickupStop,
+              dropStop: transport.dropStop,
               trackingEnabled
             }
           : null

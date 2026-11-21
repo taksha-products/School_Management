@@ -2,6 +2,7 @@ import type { Server as HttpServer } from "http";
 
 import { Server as SocketServer, type Socket } from "socket.io";
 
+import { getAllowedOrigins } from "./cors";
 import { redisClient } from "./redis";
 import type { GpsPositionUpdateMessage } from "../types/gps";
 import { verifyAccessToken } from "../utils/jwt";
@@ -40,11 +41,11 @@ const extractAccessToken = (socket: Socket): string | undefined => {
 };
 
 export const initSocketServer = (httpServer: HttpServer): SocketServer => {
-  const frontendUrl = process.env.FRONTEND_URL ?? "http://localhost:3000";
+  const allowedOrigins = getAllowedOrigins();
 
   io = new SocketServer(httpServer, {
     cors: {
-      origin: frontendUrl,
+      origin: allowedOrigins,
       credentials: true
     },
     path: "/socket.io"
