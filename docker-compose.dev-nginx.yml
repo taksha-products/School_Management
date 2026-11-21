@@ -35,7 +35,7 @@ services:
       REDIS_URL: redis://redis:6379
       NODE_ENV: production
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
-      OTP_DEBUG: ${OTP_DEBUG:-false}
+      OTP_DEBUG: ${OTP_DEBUG:-true}
       # CORS — must match browser origin exactly
       FRONTEND_URL: ${FRONTEND_URL:-https://edunex.taaksha.com}
     volumes:
