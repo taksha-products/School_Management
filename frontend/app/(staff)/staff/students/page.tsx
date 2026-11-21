@@ -7,6 +7,7 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 
 import { useAcademicYear } from "@/hooks/useAcademicYear";
+import { ParentAccountCreatedModal } from "@/components/admin/ParentAccountCreatedModal";
 import { ListPagination } from "@/components/shared/ListPagination";
 import { PageWrapper } from "@/components/layout/PageWrapper";
 import { Button } from "@/components/ui/Button";
@@ -16,13 +17,15 @@ import { TableSkeleton } from "@/components/ui/TableSkeleton";
 import { useToast } from "@/components/ui/Toast";
 import { api } from "@/lib/api";
 import type { PaginatedResponse } from "@/types/pagination";
-import type { Bus, FeePayment, Student } from "@/types";
+import type { Bus, FeePayment, ParentAccountProvision, Student } from "@/types";
 
 const studentSchema = z.object({
   name: z.string().min(2),
   grade: z.string().min(1),
-  parentName: z.string().min(2),
-  parentPhone: z.string().min(10),
+  parentName: z.string().min(2, "Parent name is required"),
+  parentPhone: z
+    .string()
+    .regex(/^[6-9]\d{9}$/, "Enter a valid 10-digit Indian mobile number"),
   address: z.string().optional(),
   status: z.enum(["active", "inactive"]),
   academicYear: z.string().min(4)
@@ -46,6 +49,7 @@ const StudentsPage = (): JSX.Element => {
   const [busFilter, setBusFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("active");
   const [page, setPage] = useState(1);
+  const [parentAccountInfo, setParentAccountInfo] = useState<ParentAccountProvision | null>(null);
 
   useEffect(() => {
     setPage(1);
@@ -104,16 +108,30 @@ const StudentsPage = (): JSX.Element => {
   const mutation = useMutation({
     mutationFn: async (payload: StudentForm) => {
       if (editing) {
-        return api.put(`/api/students/${editing._id}`, payload);
+        return api.put<{ data: Student; parentAccount?: ParentAccountProvision }>(
+          `/api/students/${editing._id}`,
+          payload
+        );
       }
-      return api.post("/api/students", payload);
+      return api.post<{ data: Student; parentAccount?: ParentAccountProvision }>(
+        "/api/students",
+        payload
+      );
     },
-    onSuccess: () => {
+    onSuccess: (response) => {
       queryClient.invalidateQueries({ queryKey: ["students"] });
       setOpen(false);
       setEditing(null);
       form.reset();
-      showToast("success", "Student saved");
+      const parentAccount = response.data.parentAccount;
+      if (parentAccount?.created && parentAccount.temporaryPassword) {
+        setParentAccountInfo(parentAccount);
+        showToast("success", "Student saved — parent account created");
+      } else if (parentAccount && !parentAccount.created) {
+        showToast("success", "Student saved and linked to existing parent");
+      } else {
+        showToast("success", "Student saved");
+      }
     },
     onError: () => showToast("error", "Failed to save student")
   });
@@ -260,15 +278,18 @@ const StudentsPage = (): JSX.Element => {
           <p className="text-xs text-rose-500">{form.formState.errors.grade?.message}</p>
           <input
             {...form.register("parentName")}
-            placeholder="Parent Name"
+            placeholder="Parent Name *"
             className="rounded border px-3 py-2"
           />
           <p className="text-xs text-rose-500">{form.formState.errors.parentName?.message}</p>
           <input
             {...form.register("parentPhone")}
-            placeholder="Parent Phone"
+            placeholder="Parent Phone * (10-digit)"
             className="rounded border px-3 py-2"
           />
+          <p className="text-xs text-slate-500">
+            Creates or links the parent login for mobile OTP / web access.
+          </p>
           <p className="text-xs text-rose-500">{form.formState.errors.parentPhone?.message}</p>
           <textarea {...form.register("address")} placeholder="Address" className="rounded border px-3 py-2" />
           <input
@@ -280,6 +301,11 @@ const StudentsPage = (): JSX.Element => {
           <Button type="submit">Save Student</Button>
         </form>
       </Modal>
+
+      <ParentAccountCreatedModal
+        info={parentAccountInfo}
+        onClose={() => setParentAccountInfo(null)}
+      />
     </PageWrapper>
   );
 };

@@ -39,8 +39,10 @@ import {
   buildStudentFeeStatusMapsByYear,
   formatStudentFeeStatusLabel
 } from "../services/schoolFeeService";
+import { ensureParentAccountsForStudents } from "../services/parentProvisioning";
 import type { IStudent } from "../models/Student";
 import { getCurrentAcademicYear } from "../utils/academicYear";
+import { normalizeIndianMobile } from "../utils/phone";
 
 const bulkRouter = Router();
 
@@ -382,13 +384,15 @@ bulkRouter.post(
             row.row,
             orgConfig
           );
+          const parentPhone =
+            normalizeIndianMobile(validated.parentPhone) ?? validated.parentPhone;
           return {
             organizationId: new Types.ObjectId(orgId),
             name: validated.name,
             grade: validated.grade,
             section: validated.section,
             parentName: validated.parentName,
-            parentPhone: validated.parentPhone,
+            parentPhone,
             address: validated.address,
             status: "active" as const,
             academicYear
@@ -412,16 +416,37 @@ bulkRouter.post(
       return;
     }
 
-    let insertedDocsCount = 0;
+    let insertedDocs: Array<{
+      _id: Types.ObjectId;
+      name: string;
+      parentName: string;
+      parentPhone: string;
+    }> = [];
+
     try {
       const inserted = await Student.insertMany(toInsert, { ordered: false });
-      insertedDocsCount = inserted.length;
+      insertedDocs = inserted.map((doc) => ({
+        _id: doc._id,
+        name: doc.name,
+        parentName: doc.parentName,
+        parentPhone: doc.parentPhone
+      }));
     } catch (error: unknown) {
       const bulkError = error as {
-        insertedDocs?: unknown[];
+        insertedDocs?: Array<{
+          _id: Types.ObjectId;
+          name: string;
+          parentName: string;
+          parentPhone: string;
+        }>;
         writeErrors?: Array<{ index: number; err?: { errmsg?: string }; errmsg?: string }>;
       };
-      insertedDocsCount = bulkError.insertedDocs?.length ?? 0;
+      insertedDocs = (bulkError.insertedDocs ?? []).map((doc) => ({
+        _id: doc._id,
+        name: doc.name,
+        parentName: doc.parentName,
+        parentPhone: doc.parentPhone
+      }));
       for (const writeError of bulkError.writeErrors ?? []) {
         const payload = toInsert[writeError.index];
         failures.push({
@@ -432,13 +457,34 @@ bulkRouter.post(
       }
     }
 
+    const parentProvisioning = await ensureParentAccountsForStudents(orgId, insertedDocs);
+
+    await Promise.all(
+      parentProvisioning.results.map((result) =>
+        Student.updateOne(
+          { _id: result.studentId },
+          { $set: { parentUserId: new Types.ObjectId(result.parentUserId) } }
+        )
+      )
+    );
+
     res.json({
       success: true,
       data: {
-        created: insertedDocsCount,
+        created: insertedDocs.length,
         skipped: rows.length - eligibleRows.length,
         failed: failures.length,
-        failures
+        failures,
+        parentsCreated: parentProvisioning.created,
+        parentsLinked: parentProvisioning.linked,
+        parentErrors: parentProvisioning.errors,
+        parentCredentials: parentProvisioning.results
+          .filter((r) => r.created && r.temporaryPassword)
+          .map((r) => ({
+            phone: r.phone,
+            email: r.email,
+            temporaryPassword: r.temporaryPassword
+          }))
       }
     });
   })

@@ -9,6 +9,7 @@ export interface DecodedAuthUser {
   role: UserRole;
   organizationId: string | null;
   name: string;
+  phone?: string;
   staffPermissions?: StaffPermissions;
   parentStudentIds?: string[];
 }
@@ -39,8 +40,9 @@ const extractAccessToken = (req: Request): string | null => {
 };
 
 /**
- * Authenticates requests via httpOnly access_token cookie.
- * Bearer Authorization is accepted only when `x-api-client: mobile` is set.
+ * Authenticates requests via:
+ * - Web: httpOnly `access_token` cookie
+ * - Mobile: `Authorization: Bearer <accessToken>` **and** `x-api-client: mobile`
  */
 export const auth = (
   req: AuthenticatedRequest,
@@ -66,6 +68,7 @@ export const auth = (
       role: decoded.role as UserRole,
       organizationId: decoded.organizationId,
       name: decoded.name,
+      phone: decoded.phone,
       staffPermissions: decoded.staffPermissions ?? decoded.permissions,
       parentStudentIds: decoded.parentStudentIds
     };

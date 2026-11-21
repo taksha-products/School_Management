@@ -1,0 +1,80 @@
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Prefer compose Redis so the API container does not depend on host Redis.
+    # Host port omitted to avoid clashes with a local Redis on :6379.
+    volumes:
+      - taksha_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    env_file:
+      - .env
+    environment:
+      PORT: "5000"
+      # Atlas comes from .env — do not use local Mongo
+      REDIS_URL: redis://redis:6379
+      FRONTEND_URL: http://localhost:3000
+      NODE_ENV: development
+      COOKIE_SECURE: "false"
+      OTP_DEBUG: "true"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - taksha_logos:/app/public/logos
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Container-to-container URL for Next rewrites / middleware
+        BACKEND_URL: http://backend:5000
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      BACKEND_URL: http://backend:5000
+      NEXT_PUBLIC_BACKEND_URL: http://localhost:5000
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  seed:
+    profiles: ["seed"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      REDIS_URL: redis://redis:6379
+      NODE_ENV: development
+      COOKIE_SECURE: "false"
+      OTP_DEBUG: "true"
+    command: ["node", "dist/seed.js"]
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  taksha_redis_data:
+  taksha_logos:

@@ -18,7 +18,7 @@ const ParentLayout = ({ children }: { children: ReactNode }): JSX.Element => {
   useEffect(() => {
     void bootstrapSession().then((user) => {
       if (!user || user.role !== "parent") {
-        router.replace("/login");
+        router.replace("/parent/login");
         return;
       }
       setName(user.name);

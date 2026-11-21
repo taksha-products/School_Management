@@ -10,15 +10,26 @@ const ACCESS_MAX_AGE_MS = ACCESS_TOKEN_MAX_AGE_SECONDS * 1000;
 const REFRESH_MAX_AGE_MS = REFRESH_TOKEN_MAX_AGE_SECONDS * 1000;
 const PRE_AUTH_MAX_AGE_MS = PRE_AUTH_MAX_AGE_SECONDS * 1000;
 
+const resolveCookieSecure = (): boolean => {
+  if (process.env.COOKIE_SECURE === "true") {
+    return true;
+  }
+  if (process.env.COOKIE_SECURE === "false") {
+    return false;
+  }
+  return process.env.NODE_ENV === "production";
+};
+
 const baseCookieOptions = (): {
   httpOnly: boolean;
   secure: boolean;
-  sameSite: "strict";
+  sameSite: "strict" | "lax";
   domain?: string;
 } => ({
   httpOnly: true,
-  secure: process.env.NODE_ENV === "production",
-  sameSite: "strict",
+  secure: resolveCookieSecure(),
+  // lax keeps web auth cookies working across local docker HTTP redirects
+  sameSite: resolveCookieSecure() ? "strict" : "lax",
   ...(process.env.COOKIE_DOMAIN ? { domain: process.env.COOKIE_DOMAIN } : {})
 });
 
