@@ -16,6 +16,13 @@ import {
   resolveOwnedChild
 } from "../services/parentBusService";
 import {
+  getParentSupportInfo,
+  listParentNotifications,
+  markAllNotificationsRead,
+  markNotificationRead,
+  updateParentProfile
+} from "../services/parentInboxService";
+import {
   createSchoolPaymentIntent,
   type SchoolPaymentLineBody
 } from "../services/schoolFeeCollection";
@@ -346,6 +353,114 @@ parentRouter.get(
         : [];
 
     res.json({ success: true, data: { points }, message: "Bus trail fetched successfully" });
+  })
+);
+
+parentRouter.get(
+  "/notifications",
+  ...guard,
+  asyncHandler(async (req, res) => {
+    const authReq = req as AuthenticatedRequest;
+    const organizationId = getScopedOrganizationId(authReq, res)!;
+    const userId = authReq.user!.userId;
+    const data = await listParentNotifications({
+      organizationId,
+      userId,
+      parentStudentIds: authReq.user?.parentStudentIds ?? []
+    });
+    res.json({ success: true, data, message: "Notifications fetched successfully" });
+  })
+);
+
+parentRouter.post(
+  "/notifications/read-all",
+  ...guard,
+  asyncHandler(async (req, res) => {
+    const authReq = req as AuthenticatedRequest;
+    const organizationId = getScopedOrganizationId(authReq, res)!;
+    const count = await markAllNotificationsRead({
+      organizationId,
+      userId: authReq.user!.userId,
+      parentStudentIds: authReq.user?.parentStudentIds ?? []
+    });
+    res.json({
+      success: true,
+      data: { marked: count },
+      message: "All notifications marked as read"
+    });
+  })
+);
+
+parentRouter.post(
+  "/notifications/:id/read",
+  ...guard,
+  asyncHandler(async (req, res) => {
+    const authReq = req as AuthenticatedRequest;
+    const organizationId = getScopedOrganizationId(authReq, res)!;
+    const ok = await markNotificationRead({
+      organizationId,
+      userId: authReq.user!.userId,
+      notificationId: String(req.params.id),
+      parentStudentIds: authReq.user?.parentStudentIds ?? []
+    });
+    if (!ok) {
+      res.status(404).json({ success: false, data: null, message: "Notification not found" });
+      return;
+    }
+    res.json({ success: true, data: { read: true }, message: "Notification marked as read" });
+  })
+);
+
+parentRouter.get(
+  "/support",
+  ...guard,
+  asyncHandler(async (req, res) => {
+    const authReq = req as AuthenticatedRequest;
+    const organizationId = getScopedOrganizationId(authReq, res)!;
+    const data = await getParentSupportInfo(organizationId);
+    if (!data) {
+      res.status(404).json({ success: false, data: null, message: "Organization not found" });
+      return;
+    }
+    res.json({ success: true, data, message: "Support info fetched successfully" });
+  })
+);
+
+parentRouter.get(
+  "/profile",
+  ...guard,
+  asyncHandler(async (req, res) => {
+    const authReq = req as AuthenticatedRequest;
+    const data = await updateParentProfile({ userId: authReq.user!.userId });
+    if (!data) {
+      res.status(404).json({ success: false, data: null, message: "User not found" });
+      return;
+    }
+    res.json({
+      success: true,
+      data: { ...data, organizationId: authReq.user!.organizationId },
+      message: "Profile fetched successfully"
+    });
+  })
+);
+
+parentRouter.patch(
+  "/profile",
+  ...guard,
+  asyncHandler(async (req, res) => {
+    const authReq = req as AuthenticatedRequest;
+    const name = typeof req.body?.name === "string" ? req.body.name : undefined;
+    try {
+      const data = await updateParentProfile({ userId: authReq.user!.userId, name });
+      if (!data) {
+        res.status(404).json({ success: false, data: null, message: "User not found" });
+        return;
+      }
+      res.json({ success: true, data, message: "Profile updated successfully" });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to update profile";
+      res.status(400).json({ success: false, data: null, message });
+    }
   })
 );
 

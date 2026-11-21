@@ -25,6 +25,7 @@ import schoolFeesRouter from "./routes/school-fees";
 import parentRouter from "./routes/parent";
 import orgUsersRouter from "./routes/org/users";
 import orgOrganizationRouter from "./routes/org/organization";
+import orgNotificationsRouter from "./routes/org/notifications";
 import organizationsRouter from "./routes/organizations";
 import superAdminOrganizationsRouter from "./routes/superadmin/organizations";
 import superAdminDashboardRouter from "./routes/superadmin/dashboard";
@@ -161,6 +162,7 @@ app.use("/api/superadmin/dashboard", auth, require2FA, superAdminDashboardRouter
 app.use("/api/superadmin/users", auth, require2FA, superAdminUsersRouter);
 app.use("/api/org/users", orgUsersRouter);
 app.use("/api/org/organization", orgOrganizationRouter);
+app.use("/api/org/notifications", orgNotificationsRouter);
 app.use("/api/organizations", organizationsRouter);
 app.use("/api/buses", busesRouter);
 app.use("/api/students", studentsRouter);
