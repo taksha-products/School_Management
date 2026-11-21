@@ -36,6 +36,11 @@ export type ParentBusState =
   | "not_running"
   | "running";
 
+export interface ChildStops {
+  pickup: string | null;
+  drop: string | null;
+}
+
 export interface ParentBusPosition {
   lat: number;
   lng: number;
@@ -57,6 +62,8 @@ export interface ParentBusPosition {
 export interface ParentBusView {
   state: ParentBusState;
   studentName: string;
+  /** The child's own pickup and drop stops (plain text set by the school). */
+  stops: ChildStops | null;
   bus: {
     busId: string;
     busNumber: string;
@@ -112,6 +119,7 @@ interface ChildBus {
   routeName: string;
   routeNumber: string | null;
   driverName: string;
+  stops: ChildStops;
 }
 
 /** Short cache so a parent polling every 10 s does not query the database for it each time. */
@@ -137,7 +145,7 @@ const findCurrentBus = async (
     effectiveFrom: { $lte: now },
     $or: [{ effectiveTo: null }, { effectiveTo: { $exists: false } }, { effectiveTo: { $gte: now } }]
   })
-    .select("busId")
+    .select("busId pickupStop dropStop")
     .lean();
 
   let result: ChildBus | null = null;
@@ -155,7 +163,11 @@ const findCurrentBus = async (
         busNumber: bus.busNumber,
         routeName: bus.routeName,
         routeNumber: bus.routeNumber?.trim() || null,
-        driverName: bus.driverName
+        driverName: bus.driverName,
+        stops: {
+          pickup: transport.pickupStop?.trim() || null,
+          drop: transport.dropStop?.trim() || null
+        }
       };
     }
   }
@@ -241,23 +253,22 @@ export const getParentBusView = async (params: {
   studentName: string;
 }): Promise<ParentBusView> => {
   const { organizationId, studentId, studentName } = params;
-  const base = { studentName, bus: null, position: null } as const;
 
-  const bus = await findCurrentBus(organizationId, studentId);
-  if (!bus) {
-    return { ...base, state: "no_bus" };
+  const child = await findCurrentBus(organizationId, studentId);
+  if (!child) {
+    return { state: "no_bus", studentName, stops: null, bus: null, position: null };
   }
 
-  const busInfo = bus;
+  const { stops, ...bus } = child;
 
   const position = await loadBusPosition(organizationId, new Types.ObjectId(bus.busId));
   if (!position.hasDevice || position.lat === null || position.lng === null) {
-    return { state: "tracking_unavailable", studentName, bus: busInfo, position: null };
+    return { state: "tracking_unavailable", studentName, stops, bus, position: null };
   }
 
   if (!isRunning(position.lastSeen, Date.now())) {
     // Bus is known but not running: reveal nothing about where it is.
-    return { state: "not_running", studentName, bus: busInfo, position: null };
+    return { state: "not_running", studentName, stops, bus, position: null };
   }
 
   const speed = position.speed ?? 0;
@@ -265,7 +276,8 @@ export const getParentBusView = async (params: {
   return {
     state: "running",
     studentName,
-    bus: busInfo,
+    stops,
+    bus,
     position: {
       lat: position.lat,
       lng: position.lng,
@@ -276,6 +288,33 @@ export const getParentBusView = async (params: {
       stoppedSince: moving ? null : position.lastMovingAt
     }
   };
+};
+
+/** Coarse state of a bus for list views (dashboard chips). Reveals no location. */
+export type BusLiveState = "live" | "stopped" | "not_running" | "no_tracker";
+
+/**
+ * Live state per bus, for a parent's children. Deduplicated by bus and served from the same
+ * short cache as the full view, so a family with two children on one bus costs one lookup.
+ */
+export const getBusLiveStates = async (
+  organizationId: string,
+  busIds: string[]
+): Promise<Map<string, BusLiveState>> => {
+  const unique = [...new Set(busIds)].filter((id) => Types.ObjectId.isValid(id));
+  const entries = await Promise.all(
+    unique.map(async (busId): Promise<[string, BusLiveState]> => {
+      const position = await loadBusPosition(organizationId, new Types.ObjectId(busId));
+      if (!position.hasDevice || position.lat === null || position.lng === null) {
+        return [busId, "no_tracker"];
+      }
+      if (!isRunning(position.lastSeen, Date.now())) {
+        return [busId, "not_running"];
+      }
+      return [busId, (position.speed ?? 0) > MOVING_SPEED_KMH ? "live" : "stopped"];
+    })
+  );
+  return new Map(entries);
 };
 
 /**

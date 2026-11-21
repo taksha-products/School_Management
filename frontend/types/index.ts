@@ -25,6 +25,8 @@ export interface BusTracker {
 export interface StudentTransportInfo {
   /** Parent view: the school has live bus tracking switched on for parents. */
   trackingEnabled?: boolean;
+  /** Parent view: coarse live state of the bus (no location), or null when unknown. */
+  liveState?: "live" | "stopped" | "not_running" | "no_tracker" | null;
   busId?: string;
   busNumber?: string;
   routeName?: string;

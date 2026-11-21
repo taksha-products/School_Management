@@ -2,27 +2,27 @@
 
 import { useQuery } from "@tanstack/react-query";
 import type { AxiosError } from "axios";
+import { Bus } from "lucide-react";
 import dynamic from "next/dynamic";
-import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { BusFreshnessNotice } from "@/components/parent/BusFreshnessNotice";
-import { BusStatusOverlay } from "@/components/parent/BusStatusOverlay";
-import { ChildBusSwitcher } from "@/components/parent/ChildBusSwitcher";
+import { BusDetails } from "@/components/parent/BusDetails";
+import { BusInfoSheet } from "@/components/parent/BusInfoSheet";
+import { BusPageControls } from "@/components/parent/BusPageControls";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { api } from "@/lib/api";
-import type { ParentBusView, ParentTrailPoint } from "@/types/parentBus";
+import type { ParentBusState, ParentBusView, ParentTrailPoint } from "@/types/parentBus";
 
-const MAP_HEIGHT = "h-[58dvh] max-h-[640px] min-h-[320px]";
+const MAP_HEIGHT = "h-[calc(100dvh-8rem)] max-h-[760px] min-h-[520px]";
 
 // The map (Leaflet) is loaded on demand so it never slows down the rest of the page.
 const ParentBusMap = dynamic(
   () => import("@/components/gps/ParentBusMap").then((module) => module.ParentBusMap),
   {
     ssr: false,
-    loading: () => <div className={`${MAP_HEIGHT} w-full animate-pulse rounded-xl bg-slate-200`} />
+    loading: () => <div className={`${MAP_HEIGHT} w-full animate-pulse rounded-2xl bg-gray-200`} />
   }
 );
 
@@ -46,38 +46,47 @@ const shouldRetry = (failureCount: number, error: unknown): boolean => {
 const errorMessage = (error: unknown): string => {
   const status = (error as AxiosError).response?.status;
   if (status === 403) {
-    return "Live bus tracking is not available for your school.";
+    return "Live bus tracking isn't available for your school.";
   }
   if (status === 404) {
     return "We couldn't find this child.";
   }
-  return "We couldn't load the bus right now. Please try again.";
+  return "We couldn't load the bus right now. Check your connection and try again.";
 };
 
-const MessageCard = ({ title, body }: { title: string; body: string }): JSX.Element => (
-  <Card>
-    <p className="text-lg font-semibold text-slate-900">{title}</p>
-    <p className="mt-1 text-sm text-slate-600">{body}</p>
+const STATE_COPY: Record<Exclude<ParentBusState, "running">, { title: string; body: string }> = {
+  no_bus: {
+    title: "No school bus assigned",
+    body: "Your child isn't assigned to a school bus yet. Contact the school office to set one up."
+  },
+  tracking_unavailable: {
+    title: "Live tracking isn't set up for this bus",
+    body: "The school hasn't connected a GPS tracker to this bus yet."
+  },
+  not_running: {
+    title: "The bus isn't running right now",
+    body: "You'll see it here when it's on its route."
+  }
+};
+
+const StateCard = ({ title, body }: { title: string; body: string }): JSX.Element => (
+  <Card className="rounded-2xl px-6 py-10 text-center">
+    <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100">
+      <Bus aria-hidden="true" className="h-8 w-8 text-gray-500" />
+    </div>
+    <p className="text-lg font-extrabold text-gray-900">{title}</p>
+    <p className="mx-auto mt-1 max-w-sm text-sm text-gray-500">{body}</p>
   </Card>
 );
 
 const PageSkeleton = (): JSX.Element => (
-  <div aria-busy="true" aria-label="Loading bus">
-    <div className="mb-3 h-8 w-2/3 animate-pulse rounded bg-slate-200" />
-    <div className={`${MAP_HEIGHT} w-full animate-pulse rounded-xl bg-slate-200`} />
-    <div className="mt-3 h-24 w-full animate-pulse rounded-xl bg-slate-200" />
-  </div>
-);
-
-const DetailRow = ({ label, value }: { label: string; value: string }): JSX.Element => (
-  <div>
-    <dt className="text-xs uppercase tracking-wide text-slate-500">{label}</dt>
-    <dd className="mt-0.5 text-sm font-medium text-slate-900">{value}</dd>
+  <div aria-busy="true" aria-label="Loading bus" className="space-y-4">
+    <div className="h-11 w-2/3 animate-pulse rounded-full bg-gray-200" />
+    <div className={`${MAP_HEIGHT} w-full animate-pulse rounded-2xl bg-gray-200`} />
   </div>
 );
 
 const ParentBusContent = ({ studentId }: { studentId: string }): JSX.Element => {
-
   const busQuery = useQuery({
     queryKey: ["parent-child-bus", studentId],
     queryFn: async ({ signal }) =>
@@ -157,93 +166,65 @@ const ParentBusContent = ({ studentId }: { studentId: string }): JSX.Element => 
     );
   }
 
+  if (!view) {
+    return (
+      <div className="mx-auto max-w-3xl space-y-4 pb-8">
+        <BusPageControls currentStudentId={studentId} />
+        <StateCard title="Bus unavailable" body={errorMessage(busQuery.error)} />
+        <Button variant="secondary" onClick={() => void busQuery.refetch()}>
+          Try again
+        </Button>
+      </div>
+    );
+  }
+
+  const showMap = view.state === "running" && view.position !== null && view.bus !== null;
+
   return (
     <div className="mx-auto max-w-3xl pb-8">
-      <Link
-        href="/parent/dashboard"
-        className="mb-3 inline-flex min-h-[44px] items-center text-sm text-slate-500 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900"
-      >
-        ← My children
-      </Link>
+      <h1 className="sr-only">{view.studentName}&apos;s bus</h1>
 
-      <ChildBusSwitcher currentStudentId={studentId} />
+      {showMap && view.position && view.bus ? (
+        <section aria-label="Live bus map">
+          <ParentBusMap
+            busNumber={view.bus.busNumber}
+            routeNumber={view.bus.routeNumber}
+            routeName={view.bus.routeName}
+            position={view.position}
+            trail={trail}
+            topLeft={<BusPageControls currentStudentId={studentId} floating />}
+            sheet={<BusInfoSheet view={view} refreshFailed={refreshFailed} />}
+          />
+        </section>
+      ) : (
+        <div className="space-y-4">
+          <BusPageControls currentStudentId={studentId} />
 
-      {busQuery.isError && !view && (
-        <div className="space-y-3">
-          <MessageCard title="Bus unavailable" body={errorMessage(busQuery.error)} />
-          <Button variant="secondary" onClick={() => void busQuery.refetch()}>
-            Try again
-          </Button>
-        </div>
-      )}
-
-      {view && (
-        <>
-          <header className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2">
-            <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <p className="text-2xl font-extrabold tracking-tight text-gray-900">
               {view.studentName}&apos;s bus
-            </h1>
+            </p>
             {view.bus?.routeNumber && (
-              <span className="rounded-lg bg-slate-900 px-3 py-1 text-sm font-bold text-white">
+              <span className="rounded-lg bg-primary-50 px-3 py-1 text-base font-extrabold text-primary">
                 {view.bus.routeNumber}
               </span>
             )}
-          </header>
+          </div>
 
-          {view.state === "no_bus" && (
-            <MessageCard
-              title="No school bus assigned"
-              body="Your child isn't assigned to a school bus yet. Please contact the school office."
-            />
-          )}
-
-          {view.state === "tracking_unavailable" && (
-            <MessageCard
-              title="Live tracking isn't set up for this bus"
-              body="The school hasn't connected a GPS tracker to this bus yet."
-            />
-          )}
-
-          {view.state === "not_running" && (
-            <MessageCard
-              title="The bus isn't running right now"
-              body="You'll be able to see the bus here when it is on its route."
-            />
-          )}
-
-          {view.state === "running" && view.position && view.bus && (
-            <>
-              <BusFreshnessNotice lastSeen={view.position.lastSeen} refreshFailed={refreshFailed} />
-
-              <section aria-label="Live bus map">
-                <ParentBusMap
-                  busNumber={view.bus.busNumber}
-                  routeNumber={view.bus.routeNumber}
-                  routeName={view.bus.routeName}
-                  position={view.position}
-                  trail={trail}
-                  overlay={<BusStatusOverlay position={view.position} />}
-                />
-              </section>
-            </>
-          )}
+          {view.state !== "running" && <StateCard {...STATE_COPY[view.state]} />}
 
           {view.bus && (
-            <Card className="mt-3">
-              <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-                <DetailRow label="Bus number" value={view.bus.busNumber} />
-                <DetailRow label="Route" value={view.bus.routeName} />
-                {view.bus.driverName && <DetailRow label="Driver" value={view.bus.driverName} />}
-              </dl>
+            <Card className="rounded-2xl px-5 py-3">
+              <BusDetails view={view} />
             </Card>
           )}
+        </div>
+      )}
 
-          {view.state === "running" && (
-            <p className="mt-3 text-xs text-slate-400">
-              The bus location is shown only while the bus is on its route.
-            </p>
-          )}
-        </>
+      {view.state === "running" && (
+        <p className="mt-3 text-xs text-gray-400">
+          The bus location is shown only while the bus is on its route.
+        </p>
       )}
     </div>
   );

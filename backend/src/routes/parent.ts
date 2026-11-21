@@ -10,6 +10,7 @@ import { SchoolFeePayment } from "../models/SchoolFeePayment";
 import { Student } from "../models/Student";
 import { StudentTransport } from "../models/StudentTransport";
 import {
+  getBusLiveStates,
   getParentBusTrail,
   getParentBusView,
   resolveOwnedChild
@@ -65,6 +66,15 @@ parentRouter.get(
     ]);
     const trackingEnabled = gpsEnabled === true && portalEnabled === true;
 
+    // Coarse live state per bus (no location) for the dashboard chips; skipped when tracking is off.
+    const busIdOf = (t: (typeof transports)[number]): string => {
+      const populated = t.busId as unknown as { _id?: { toString(): string } } | null;
+      return String(populated?._id ?? t.busId);
+    };
+    const liveStates = trackingEnabled
+      ? await getBusLiveStates(orgId, transports.map(busIdOf))
+      : new Map<string, string>();
+
     const data = children.map((child) => {
       const transport = transportByStudent.get(String(child._id));
       const bus = transport?.busId as { busNumber?: string; routeName?: string } | null;
@@ -77,7 +87,8 @@ parentRouter.get(
               monthlyTransportFee: transport.monthlyTransportFee,
               pickupStop: transport.pickupStop,
               dropStop: transport.dropStop,
-              trackingEnabled
+              trackingEnabled,
+              liveState: trackingEnabled ? (liveStates.get(busIdOf(transport)) ?? null) : null
             }
           : null
       };

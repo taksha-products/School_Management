@@ -36,7 +36,7 @@ export const BusFreshnessNotice = ({
     <div
       role="status"
       aria-live="polite"
-      className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+      className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
     >
       {message}
     </div>

@@ -1,8 +1,11 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
+import { useEffect } from "react";
 import { Bus, Navigation } from "lucide-react";
 
+import { LiveStateChip } from "@/components/parent/LiveStateChip";
 import { TrackBusLink } from "@/components/parent/TrackBusLink";
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
@@ -19,6 +22,16 @@ const ParentBusPage = (): JSX.Element => {
   });
 
   const children = childrenQuery.data ?? [];
+  const router = useRouter();
+
+  // One child with live tracking: skip the list and open the bus directly.
+  const trackable = children.filter((child) => child.transport?.trackingEnabled);
+  const onlyChildId = children.length === 1 && trackable.length === 1 ? trackable[0]?._id : undefined;
+  useEffect(() => {
+    if (onlyChildId) {
+      router.replace(`/parent/child/${onlyChildId}/bus`);
+    }
+  }, [onlyChildId, router]);
 
   return (
     <div>
@@ -51,10 +64,13 @@ const ParentBusPage = (): JSX.Element => {
 
                 {bus?.busNumber ? (
                   <div className="mt-4 space-y-3">
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-primary-50 px-3 py-1 text-sm font-semibold text-primary">
-                      <Bus className="h-4 w-4" />
-                      Bus {bus.busNumber}
-                    </span>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-primary-50 px-3 py-1 text-sm font-semibold text-primary">
+                        <Bus className="h-4 w-4" />
+                        Bus {bus.busNumber}
+                      </span>
+                      <LiveStateChip state={bus.liveState} />
+                    </div>
                     {bus.routeName ? (
                       <p className="text-sm font-semibold text-gray-900">{bus.routeName}</p>
                     ) : null}
