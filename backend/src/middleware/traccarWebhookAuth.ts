@@ -3,6 +3,52 @@ import type { NextFunction, Request, Response } from "express";
 
 let warnedMissingSecret = false;
 
+/**
+ * Lockout for secret guessing: after too many wrong secrets from one address, that address is
+ * refused for the rest of the window. Only failures are counted, so a legitimate Traccar server
+ * (however many positions it sends, however concurrently) is never affected.
+ */
+const FAILURE_WINDOW_MS = 15 * 60 * 1000;
+const MAX_FAILURES = 30;
+const MAX_TRACKED_ADDRESSES = 5_000;
+const failures = new Map<string, { count: number; resetAt: number }>();
+
+const clientKey = (req: Request): string => req.ip ?? "unknown";
+
+const isLockedOut = (key: string, now: number): boolean => {
+  const record = failures.get(key);
+  if (!record) {
+    return false;
+  }
+  if (now >= record.resetAt) {
+    failures.delete(key);
+    return false;
+  }
+  return record.count >= MAX_FAILURES;
+};
+
+const recordFailure = (key: string, now: number): void => {
+  if (failures.size >= MAX_TRACKED_ADDRESSES) {
+    for (const [address, record] of failures) {
+      if (now >= record.resetAt) {
+        failures.delete(address);
+      }
+    }
+    if (failures.size >= MAX_TRACKED_ADDRESSES) {
+      failures.clear();
+    }
+  }
+  const record = failures.get(key);
+  if (record && now < record.resetAt) {
+    record.count += 1;
+  } else {
+    failures.set(key, { count: 1, resetAt: now + FAILURE_WINDOW_MS });
+  }
+};
+
+/** Test helper: forget all recorded failures. */
+export const resetWebhookFailures = (): void => failures.clear();
+
 const digest = (value: string): Buffer => createHash("sha256").update(value).digest();
 
 const constantTimeEquals = (provided: string, expected: string): boolean =>
@@ -49,8 +95,17 @@ export const requireTraccarWebhookSecret = (
     return;
   }
 
+  const key = clientKey(req);
+  const now = Date.now();
+
+  if (isLockedOut(key, now)) {
+    res.status(429).json({ success: false, message: "Too many failed attempts" });
+    return;
+  }
+
   const provided = readProvidedSecret(req);
   if (!provided || !constantTimeEquals(provided, expected)) {
+    recordFailure(key, now);
     res.status(401).json({ success: false, message: "Unauthorized" });
     return;
   }

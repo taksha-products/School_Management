@@ -52,6 +52,8 @@ const FALLBACK_CENTER: [number, number] = [12.9716, 77.5946];
 const FALLBACK_ZOOM = 12;
 const STATUS_TICK_MS = 15_000;
 const LIST_REFRESH_MS = 60_000;
+/** Without the live socket (blocked, or cookie not shared with the API) fall back to quick polling. */
+const LIST_REFRESH_NO_SOCKET_MS = 15_000;
 const STATUS_ORDER: Record<LiveBusStatus, number> = {
   live: 0,
   stopped: 1,
@@ -99,7 +101,7 @@ export const LiveMapClient = (): JSX.Element => {
     queryKey: ["live-buses"],
     queryFn: async () =>
       (await api.get<{ data: LiveBusApiRow[] }>("/api/gps/buses/live")).data.data,
-    refetchInterval: LIST_REFRESH_MS
+    refetchInterval: connected ? LIST_REFRESH_MS : LIST_REFRESH_NO_SOCKET_MS
   });
 
   // Statuses depend on elapsed time, so re-evaluate them periodically.

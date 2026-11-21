@@ -46,6 +46,23 @@ const requireOrgAdminOrSuper = (
 
 export const traccarWebhookRouter = Router();
 
+/** Log an ignored position for a device at most once per interval, so one stray tracker cannot flood the log. */
+const IGNORED_LOG_INTERVAL_MS = 10 * 60 * 1000;
+const IGNORED_LOG_MAX_DEVICES = 1_000;
+const lastIgnoredLog = new Map<number, number>();
+
+const shouldLogIgnored = (traccarDeviceId: number, now: number): boolean => {
+  const last = lastIgnoredLog.get(traccarDeviceId);
+  if (last !== undefined && now - last < IGNORED_LOG_INTERVAL_MS) {
+    return false;
+  }
+  if (lastIgnoredLog.size >= IGNORED_LOG_MAX_DEVICES) {
+    lastIgnoredLog.clear();
+  }
+  lastIgnoredLog.set(traccarDeviceId, now);
+  return true;
+};
+
 traccarWebhookRouter.post(
   "/webhook/traccar",
   requireTraccarWebhookSecret,
@@ -65,7 +82,11 @@ traccarWebhookRouter.post(
 
       const outcome = await ingestPosition(position, body);
 
-      if (outcome.status === "ignored" && outcome.reason !== "no GPS fix") {
+      if (
+        outcome.status === "ignored" &&
+        outcome.reason !== "no GPS fix" &&
+        shouldLogIgnored(position.deviceId, Date.now())
+      ) {
         // eslint-disable-next-line no-console
         console.warn("Traccar webhook: position ignored", {
           traccarDeviceId: position.deviceId,

@@ -30,6 +30,9 @@ services:
       NODE_ENV: development
       COOKIE_SECURE: "false"
       OTP_DEBUG: "true"
+      # Inside compose the backend reaches Traccar by service name (overrides the host-style
+      # value in .env). The Traccar admin token/credentials still come from .env.
+      TRACCAR_URL: http://traccar:8082
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -45,6 +48,8 @@ services:
       args:
         # Container-to-container URL for Next rewrites / middleware
         BACKEND_URL: http://backend:5000
+        # Public API URL as the browser reaches it; baked into the client bundle at build time.
+        NEXT_PUBLIC_BACKEND_URL: ${NEXT_PUBLIC_BACKEND_URL:-http://localhost:5000}
     restart: unless-stopped
     ports:
       - "3000:3000"
@@ -81,7 +86,8 @@ services:
   # (http://traccar:8082 inside compose) and TRACCAR_TOKEN or TRACCAR_USER/TRACCAR_PASSWORD
   # in .env. Traccar forwards positions to the backend webhook using TRACCAR_WEBHOOK_SECRET.
   traccar:
-    image: traccar/traccar:latest
+    # Pinned to the version this integration was tested against; upgrade deliberately.
+    image: traccar/traccar:6.17.0
     container_name: traccar
     restart: unless-stopped
     ports:

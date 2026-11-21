@@ -13,6 +13,11 @@ COPY . .
 # Used at build time for Next.js rewrites / edge middleware defaults
 ARG BACKEND_URL=http://backend:5000
 ENV BACKEND_URL=${BACKEND_URL}
+# NEXT_PUBLIC_* values are inlined into the browser bundle at build time, so they must be
+# build arguments (a runtime environment variable would have no effect on the client).
+# Public URL of the API as the browser reaches it (used by the live-tracking socket).
+ARG NEXT_PUBLIC_BACKEND_URL=http://localhost:5000
+ENV NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL}
 ENV NEXT_TELEMETRY_DISABLED=1
 
 RUN npm run build
@@ -20,6 +25,10 @@ RUN npm run build
 FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
+# The edge middleware reads BACKEND_URL when the container runs (not only at build time).
+# Default it to the value used at build; override at runtime with -e / the compose environment.
+ARG BACKEND_URL=http://backend:5000
+ENV BACKEND_URL=${BACKEND_URL}
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0

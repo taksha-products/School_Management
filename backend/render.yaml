@@ -5,6 +5,32 @@ services:
     rootDir: backend
     buildCommand: npm install --include=dev && npm run build
     startCommand: npm start
+    healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
         value: production
+      # Secrets and environment-specific values: set these in the Render dashboard.
+      - key: MONGO_URI
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_REFRESH_SECRET
+        sync: false
+      - key: TOTP_ENCRYPTION_KEY
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      # Share the parent domain of the frontend and API (e.g. .school.com) so the login cookie
+      # reaches the API directly, which the live-tracking socket needs.
+      - key: COOKIE_DOMAIN
+        sync: false
+      # GPS tracking (Traccar). The webhook secret is REQUIRED in production: without it the
+      # webhook refuses all positions.
+      - key: TRACCAR_URL
+        sync: false
+      - key: TRACCAR_TOKEN
+        sync: false
+      - key: TRACCAR_WEBHOOK_SECRET
+        sync: false

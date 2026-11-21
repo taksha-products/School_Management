@@ -3,14 +3,18 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 
 import type { Request, Response } from "express";
 
-import { requireTraccarWebhookSecret } from "../middleware/traccarWebhookAuth";
+import { requireTraccarWebhookSecret, resetWebhookFailures } from "../middleware/traccarWebhookAuth";
 
 interface Outcome {
   status: number | null;
   nextCalled: boolean;
 }
 
-const run = (req: { headers?: Record<string, string>; query?: Record<string, unknown> }): Outcome => {
+const run = (req: {
+  headers?: Record<string, string>;
+  query?: Record<string, unknown>;
+  ip?: string;
+}): Outcome => {
   const outcome: Outcome = { status: null, nextCalled: false };
   const res = {
     status(code: number) {
@@ -22,7 +26,7 @@ const run = (req: { headers?: Record<string, string>; query?: Record<string, unk
     }
   } as unknown as Response;
   requireTraccarWebhookSecret(
-    { headers: req.headers ?? {}, query: req.query ?? {} } as unknown as Request,
+    { headers: req.headers ?? {}, query: req.query ?? {}, ip: req.ip } as unknown as Request,
     res,
     () => {
       outcome.nextCalled = true;
@@ -44,6 +48,7 @@ const restore = (key: string, value: string | undefined): void => {
 
 beforeEach(() => {
   delete mutableEnv.TRACCAR_WEBHOOK_SECRET;
+  resetWebhookFailures();
 });
 afterEach(() => {
   restore("TRACCAR_WEBHOOK_SECRET", saved.secret);
@@ -87,5 +92,28 @@ describe("requireTraccarWebhookSecret", () => {
   it("allows requests in development when no secret is configured", () => {
     mutableEnv.NODE_ENV = "development";
     assert.equal(run({}).nextCalled, true);
+  });
+
+  it("locks an address out after 30 wrong secrets, even for the right secret", () => {
+    mutableEnv.TRACCAR_WEBHOOK_SECRET = "s3cret-value";
+    for (let i = 0; i < 30; i += 1) {
+      assert.equal(run({ ip: "9.9.9.9", query: { key: `guess-${i}` } }).status, 401);
+    }
+    assert.deepEqual(run({ ip: "9.9.9.9", query: { key: "s3cret-value" } }), { status: 429, nextCalled: false });
+  });
+
+  it("never throttles a legitimate server, however many positions it sends", () => {
+    mutableEnv.TRACCAR_WEBHOOK_SECRET = "s3cret-value";
+    for (let i = 0; i < 5_000; i += 1) {
+      assert.equal(run({ ip: "10.0.0.1", query: { key: "s3cret-value" } }).nextCalled, true);
+    }
+  });
+
+  it("a lockout does not affect other addresses", () => {
+    mutableEnv.TRACCAR_WEBHOOK_SECRET = "s3cret-value";
+    for (let i = 0; i < 31; i += 1) {
+      run({ ip: "9.9.9.9", query: { key: "bad" } });
+    }
+    assert.equal(run({ ip: "10.0.0.1", query: { key: "s3cret-value" } }).nextCalled, true);
   });
 });
