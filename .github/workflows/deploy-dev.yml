@@ -184,5 +184,9 @@ jobs:
             docker compose -f docker-compose.dev-nginx.yml pull
             docker compose -f docker-compose.dev-nginx.yml up -d
 
+            # nginx resolves frontend/backend addresses only when it starts. Recreated containers
+            # get new addresses, so reload nginx or it keeps proxying to the old ones (502).
+            docker compose -f docker-compose.dev-nginx.yml exec -T dev-nginx nginx -s reload
+
             docker image prune -f
             echo "Deployed ${DOCKERHUB_USERNAME}/school-management-*:${IMAGE_TAG}"
