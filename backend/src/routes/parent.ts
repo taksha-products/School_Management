@@ -4,19 +4,23 @@ import { auth, type AuthenticatedRequest } from "../middleware/auth";
 import { orgScope } from "../middleware/orgScope";
 import { requireOrgScope } from "../middleware/requireOrgScope";
 import { canAccessOrg, isParent } from "../middleware/roleCheck";
+import { Bus } from "../models/Bus";
 import { SchoolFeePayment } from "../models/SchoolFeePayment";
 import { Student } from "../models/Student";
 import { StudentTransport } from "../models/StudentTransport";
 import {
-  buildReceiptView,
-  buildStudentFeeLedgerView
-} from "../services/schoolFeeService";
-import {
   createSchoolPaymentIntent,
   type SchoolPaymentLineBody
 } from "../services/schoolFeeCollection";
+import {
+  buildReceiptView,
+  buildStudentFeeLedgerView
+} from "../services/schoolFeeService";
 import { asyncHandler } from "../utils/asyncHandler";
 import { getScopedOrganizationId, orgFilter } from "../utils/orgFilter";
+
+// Ensure Bus is registered for transport.busId populate.
+void Bus;
 
 const parentRouter = Router();
 
@@ -58,7 +62,8 @@ parentRouter.get(
               busNumber: bus?.busNumber,
               routeName: bus?.routeName,
               monthlyTransportFee: transport.monthlyTransportFee,
-              pickupStop: transport.pickupStop
+              pickupStop: transport.pickupStop,
+              dropStop: transport.dropStop
             }
           : null
       };

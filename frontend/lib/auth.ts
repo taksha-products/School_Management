@@ -11,6 +11,7 @@ export interface AuthUser {
   userId: string;
   name: string;
   email?: string;
+  phone?: string;
   role: UserRole;
   organizationId: string | null;
   staffPermissions?: StaffPermissions;
@@ -21,6 +22,7 @@ interface ApiUserPayload {
   id: string;
   name: string;
   email?: string;
+  phone?: string;
   role: UserRole;
   organizationId: string | null;
   permissions?: StaffPermissions;
@@ -57,6 +59,7 @@ const mapApiUser = (user: ApiUserPayload): AuthUser => ({
   userId: user.id,
   name: user.name,
   email: user.email,
+  phone: user.phone,
   role: user.role,
   organizationId: user.organizationId,
   staffPermissions: user.permissions,
@@ -66,6 +69,8 @@ const mapApiUser = (user: ApiUserPayload): AuthUser => ({
 const mapMeData = (data: AuthUser): AuthUser => ({
   userId: data.userId,
   name: data.name,
+  email: data.email,
+  phone: data.phone,
   role: data.role,
   organizationId: data.organizationId ?? null,
   staffPermissions: data.staffPermissions,

@@ -15,7 +15,8 @@ export interface StudentTransportInfo {
   routeName?: string;
   monthlyTransportFee: number;
   pickupStop?: string;
-  status: "active" | "inactive";
+  dropStop?: string;
+  status?: "active" | "inactive";
 }
 
 export interface Student {
