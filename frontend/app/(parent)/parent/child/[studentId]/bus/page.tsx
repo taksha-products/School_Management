@@ -15,7 +15,10 @@ import { Card } from "@/components/ui/Card";
 import { api } from "@/lib/api";
 import type { ParentBusState, ParentBusView, ParentTrailPoint } from "@/types/parentBus";
 
-const MAP_HEIGHT = "h-[calc(100dvh-8rem)] max-h-[760px] min-h-[520px]";
+// Phones: the map fills the screen under the header and the panel overlays its bottom.
+// Tablets and up (sm): a shorter map, with the panel below it instead of over it.
+const MAP_HEIGHT =
+  "h-[calc(100dvh-8rem)] min-h-[420px] max-h-[760px] sm:h-[min(62dvh,560px)] sm:min-h-[300px]";
 
 // The map (Leaflet) is loaded on demand so it never slows down the rest of the page.
 const ParentBusMap = dynamic(
@@ -213,19 +216,10 @@ const ParentBusContent = ({ studentId }: { studentId: string }): JSX.Element => 
 
           {view.state !== "running" && <StateCard {...STATE_COPY[view.state]} />}
 
-          {view.bus && (
-            <Card className="rounded-2xl px-5 py-3">
-              <BusDetails view={view} />
-            </Card>
-          )}
+          {view.bus && <BusDetails view={view} />}
         </div>
       )}
 
-      {view.state === "running" && (
-        <p className="mt-3 text-xs text-gray-400">
-          The bus location is shown only while the bus is on its route.
-        </p>
-      )}
     </div>
   );
 };

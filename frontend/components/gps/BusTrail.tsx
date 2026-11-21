@@ -1,7 +1,10 @@
 "use client";
 
-import { useMemo } from "react";
+import type L from "leaflet";
+import { useCallback, useEffect, useMemo, useRef, type MutableRefObject } from "react";
 import { Polyline } from "react-leaflet";
+
+const CASING_COLOR = "#ffffff";
 
 interface BusTrailProps {
   /** Oldest to newest. */
@@ -42,6 +45,18 @@ export const BusTrail = ({ points, color, highlighted, dimmed }: BusTrailProps):
 
   return (
     <>
+      {/* White outline under the whole path so it stands out on a busy map. */}
+      <Polyline
+        positions={points}
+        interactive={false}
+        pathOptions={{
+          color: CASING_COLOR,
+          weight: weight + 4,
+          opacity: 0.65 * strength,
+          lineCap: "round",
+          lineJoin: "round"
+        }}
+      />
       {segments.map((segment) => (
         <Polyline
           key={segment.index}
@@ -56,6 +71,74 @@ export const BusTrail = ({ points, color, highlighted, dimmed }: BusTrailProps):
           }}
         />
       ))}
+    </>
+  );
+};
+
+export interface TrailHeadHandle {
+  /** Moves the free end of the head segment to the bus's displayed position. */
+  setEnd: (lat: number, lng: number) => void;
+}
+
+interface BusTrailHeadProps {
+  /** Last point of the stored trail: the bus was here when its current glide started. */
+  anchor: [number, number];
+  /** Where the bus is heading (its latest reported position). */
+  end: [number, number];
+  color: string;
+  weight: number;
+  handleRef: MutableRefObject<TrailHeadHandle | null>;
+}
+
+/**
+ * The newest piece of the trail, from the last stored point to the bus as it is drawn right now.
+ * Its end is moved directly on every animation frame, so the line stops at the gliding bus
+ * instead of running ahead to the latest reported position.
+ */
+export const BusTrailHead = ({ anchor, end, color, weight, handleRef }: BusTrailHeadProps): JSX.Element => {
+  const casing = useRef<L.Polyline | null>(null);
+  const line = useRef<L.Polyline | null>(null);
+  const anchorRef = useRef(anchor);
+  const displayed = useRef<[number, number]>(end);
+  // Only used to draw the first frame; later positions are set through the refs.
+  const initial = useRef<[number, number][]>([anchor, end]);
+
+  const apply = useCallback((): void => {
+    const path: [number, number][] = [anchorRef.current, displayed.current];
+    casing.current?.setLatLngs(path);
+    line.current?.setLatLngs(path);
+  }, []);
+
+  useEffect(() => {
+    anchorRef.current = anchor;
+    apply();
+  }, [anchor, apply]);
+
+  useEffect(() => {
+    handleRef.current = {
+      setEnd: (lat, lng) => {
+        displayed.current = [lat, lng];
+        apply();
+      }
+    };
+    return () => {
+      handleRef.current = null;
+    };
+  }, [apply, handleRef]);
+
+  const casingStyle = useMemo(
+    () => ({ color: CASING_COLOR, weight: weight + 4, opacity: 0.65, lineCap: "round" as const, lineJoin: "round" as const }),
+    [weight]
+  );
+  const lineStyle = useMemo(
+    () => ({ color, weight, opacity: 0.9, lineCap: "round" as const, lineJoin: "round" as const }),
+    [color, weight]
+  );
+
+  return (
+    <>
+      <Polyline ref={casing} positions={initial.current} interactive={false} pathOptions={casingStyle} />
+      <Polyline ref={line} positions={initial.current} interactive={false} pathOptions={lineStyle} />
     </>
   );
 };

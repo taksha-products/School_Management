@@ -50,15 +50,21 @@ const ParentLayout = ({ children }: { children: ReactNode }): JSX.Element => {
             <Link href="/parent/dashboard" className="order-1 flex min-w-0 items-center">
               <BrandLogo />
             </Link>
-            <nav className="order-3 -mx-1 flex w-full items-center gap-1 overflow-x-auto sm:order-2 sm:mx-0 sm:w-auto sm:overflow-visible">
+            <nav className="order-3 -mx-1 flex w-full items-center gap-0.5 overflow-x-auto [scrollbar-width:none] sm:order-2 sm:mx-0 sm:w-auto sm:gap-1 sm:overflow-visible [&::-webkit-scrollbar]:hidden">
               {links.map((l) => {
-                const active = pathname === l.match || pathname.startsWith(`${l.match}/`);
+                // A child's bus page (/parent/child/<id>/bus) belongs under the Bus tab.
+                const active =
+                  pathname === l.match ||
+                  pathname.startsWith(`${l.match}/`) ||
+                  (l.label === "Bus" &&
+                    pathname.startsWith("/parent/child/") &&
+                    pathname.endsWith("/bus"));
                 return (
                   <Link
                     key={l.href}
                     href={l.href}
                     className={cn(
-                      "shrink-0 rounded-full px-3.5 py-2 text-sm font-semibold transition",
+                      "shrink-0 rounded-full px-3 py-2 text-sm font-semibold transition sm:px-3.5",
                       active
                         ? "bg-primary-50 text-primary"
                         : "text-gray-600 hover:bg-gray-50 hover:text-primary"
