@@ -206,6 +206,8 @@ export const LiveMapClient = (): JSX.Element => {
               bearing={bus.bearing ?? 0}
               timestamp={bus.lastSeen}
               status={bus.status}
+              selected={selectedBusId === bus.busId}
+              onSelect={setSelectedBusId}
             />
           ))}
         </MapContainer>

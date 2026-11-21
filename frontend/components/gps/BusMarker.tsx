@@ -1,15 +1,41 @@
 "use client";
 
 import L from "leaflet";
-import { useMemo } from "react";
-import { Marker, Popup } from "react-leaflet";
+import { useMemo, useState } from "react";
+import { Marker, Popup, useMap, useMapEvents } from "react-leaflet";
 
-import { BUS_STATUS_META, formatLastSeen, type LiveBusStatus } from "@/lib/busTracking";
+import {
+  BUS_STATUS_META,
+  formatLastSeen,
+  shortBusLabel,
+  type LiveBusStatus
+} from "@/lib/busTracking";
 
-const MARKER_WIDTH = 96;
-const BADGE_SIZE = 34;
-/** Centre of the badge, used as the map anchor so the bus sits exactly on its position. */
-const BADGE_CENTER_Y = 19;
+/** Top-down school bus, nose pointing up (north). Optimised from the supplied artwork. */
+const BUS_IMAGE_SRC = "/images/bus-top.png";
+/** Height / width of the artwork. */
+const BUS_ASPECT = 250 / 96;
+
+/** From this zoom level the full bus number is printed under the bus as well. */
+const FULL_LABEL_MIN_ZOOM = 14;
+
+/** Bus width in px per zoom level, so buses stay readable zoomed out and detailed zoomed in. */
+const busWidthForZoom = (zoom: number): number => {
+  if (zoom <= 11) return 14;
+  if (zoom === 12) return 17;
+  if (zoom === 13) return 21;
+  if (zoom === 14) return 25;
+  if (zoom === 15) return 30;
+  return 36;
+};
+
+const Z_OFFSET: Record<LiveBusStatus, number> = {
+  live: 300,
+  stopped: 200,
+  offline: 100,
+  no_device: 0
+};
+const SELECTED_Z_OFFSET = 1000;
 
 const escapeHtml = (value: string): string =>
   value
@@ -19,45 +45,56 @@ const escapeHtml = (value: string): string =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
-// Bus glyph (Lucide "bus", ISC licence), drawn in white inside the status-coloured badge.
-const BUS_GLYPH = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M8 6v6"/><path d="M15 6v6"/><path d="M2 12h19.6"/><path d="M18 18h3s.5-1.7.8-2.8c.1-.4.2-.8.2-1.2 0-.4-.1-.8-.2-1.2l-1.4-5C20.1 6.8 19.1 6 18 6H4a2 2 0 0 0-2 2v10h3"/><circle cx="7" cy="18" r="2"/><path d="M9 18h5"/><circle cx="16" cy="18" r="2"/></svg>`;
-
 interface BusIconOptions {
   busNumber: string;
   color: string;
   bearing: number;
-  showHeading: boolean;
+  busWidth: number;
+  offline: boolean;
+  selected: boolean;
+  showFullNumber: boolean;
 }
 
-const createBusDivIcon = ({ busNumber, color, bearing, showHeading }: BusIconOptions): L.DivIcon => {
-  const label = escapeHtml(busNumber);
-  const left = (MARKER_WIDTH - BADGE_SIZE) / 2;
-  const ringSize = BADGE_SIZE + 14;
+/**
+ * The bus is drawn from the top-down artwork and rotated to its heading. A glow in the
+ * status colour follows the bus outline (green moving, orange stopped, grey offline), and
+ * an upright number tag below it carries the bus code, so the number never turns upside down.
+ */
+const createBusDivIcon = (options: BusIconOptions): L.DivIcon => {
+  const { busNumber, color, bearing, busWidth, offline, selected, showFullNumber } = options;
 
-  // Direction arrow orbits the badge; only drawn while the bus is moving.
-  const heading = showHeading
-    ? `<div style="position:absolute;left:${(MARKER_WIDTH - ringSize) / 2}px;top:${BADGE_CENTER_Y - ringSize / 2}px;width:${ringSize}px;height:${ringSize}px;transform:rotate(${bearing}deg);pointer-events:none;">
-         <div style="position:absolute;left:50%;top:-5px;margin-left:-6px;width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:10px solid ${color};"></div>
-       </div>`
-    : "";
+  const busHeight = Math.round(busWidth * BUS_ASPECT);
+  const scale = selected ? 1.25 : 1;
+  const boxWidth = Math.max(busHeight + 16, 120);
+  const centerX = boxWidth / 2;
+  const centerY = Math.round(busHeight / 2) + 8;
+  const tagTop = centerY + Math.round((busHeight * scale) / 2) + 4;
+  const boxHeight = tagTop + 24;
+
+  const glow = selected
+    ? `drop-shadow(0 0 1.5px ${color}) drop-shadow(0 0 3px ${color}) drop-shadow(0 0 6px ${color})`
+    : `drop-shadow(0 0 1.5px ${color}) drop-shadow(0 0 3px ${color})`;
+  const imageFilter = offline ? `grayscale(1) ${glow}` : glow;
+
+  const code = escapeHtml(shortBusLabel(busNumber));
+  const full = showFullNumber ? escapeHtml(busNumber) : code;
 
   const html = `
-    <div style="position:relative;width:${MARKER_WIDTH}px;height:64px;font-family:Inter,system-ui,sans-serif;">
-      ${heading}
-      <div style="position:absolute;left:${left}px;top:${BADGE_CENTER_Y - BADGE_SIZE / 2}px;width:${BADGE_SIZE}px;height:${BADGE_SIZE}px;border-radius:50%;background:${color};border:2.5px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;">
-        ${BUS_GLYPH}
+    <div style="position:relative;width:${boxWidth}px;height:${boxHeight}px;font-family:Inter,system-ui,sans-serif;">
+      <div class="bus-marker__hit" style="position:absolute;left:${centerX - busWidth / 2}px;top:${centerY - busHeight / 2}px;width:${busWidth}px;height:${busHeight}px;transform:rotate(${bearing}deg) scale(${scale});transform-origin:center;opacity:${offline ? 0.85 : 1};">
+        <img src="${BUS_IMAGE_SRC}" alt="" width="${busWidth}" height="${busHeight}" draggable="false" style="display:block;width:100%;height:100%;filter:${imageFilter};" />
       </div>
-      <div style="position:absolute;left:0;right:0;top:${BADGE_CENTER_Y + BADGE_SIZE / 2 + 3}px;display:flex;justify-content:center;">
-        <span style="background:#fff;color:#111827;border:1.5px solid ${color};border-radius:6px;padding:1px 6px;font-size:11px;font-weight:700;line-height:16px;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.25);">${label}</span>
+      <div class="bus-marker__hit" style="position:absolute;left:0;right:0;top:${tagTop}px;display:flex;justify-content:center;">
+        <span style="background:#fff;color:#0f172a;border:2px solid ${color};border-radius:7px;padding:1px 7px;font-size:12px;font-weight:800;line-height:17px;white-space:nowrap;letter-spacing:.2px;box-shadow:0 1px 4px rgba(0,0,0,.35);">${full}</span>
       </div>
     </div>`;
 
   return L.divIcon({
-    className: "",
+    className: "bus-marker",
     html,
-    iconSize: [MARKER_WIDTH, 64],
-    iconAnchor: [MARKER_WIDTH / 2, BADGE_CENTER_Y],
-    popupAnchor: [0, -(BADGE_SIZE / 2 + 4)]
+    iconSize: [boxWidth, boxHeight],
+    iconAnchor: [centerX, centerY],
+    popupAnchor: [0, -Math.round(busHeight / 2)]
   });
 };
 
@@ -71,6 +108,8 @@ export interface BusMarkerProps {
   bearing: number;
   timestamp: string | null;
   status: LiveBusStatus;
+  selected?: boolean;
+  onSelect?: (busId: string) => void;
 }
 
 export const BusMarker = ({
@@ -82,22 +121,42 @@ export const BusMarker = ({
   speed,
   bearing,
   timestamp,
-  status
+  status,
+  selected = false,
+  onSelect
 }: BusMarkerProps): JSX.Element => {
+  const map = useMap();
+  const [zoom, setZoom] = useState(() => map.getZoom());
+  useMapEvents({ zoomend: () => setZoom(map.getZoom()) });
+
   const meta = BUS_STATUS_META[status];
+  const showFullNumber = zoom >= FULL_LABEL_MIN_ZOOM;
+  const busWidth = busWidthForZoom(zoom);
+  // Round so tiny heading jitter does not rebuild the marker on every update.
+  const roundedBearing = Math.round(bearing / 5) * 5;
+
   const icon = useMemo(
     () =>
       createBusDivIcon({
         busNumber,
         color: meta.color,
-        bearing,
-        showHeading: status === "live"
+        bearing: roundedBearing,
+        busWidth,
+        offline: status === "offline",
+        selected,
+        showFullNumber
       }),
-    [busNumber, meta.color, bearing, status]
+    [busNumber, meta.color, roundedBearing, busWidth, status, selected, showFullNumber]
   );
 
   return (
-    <Marker key={busId} position={[lat, lng]} icon={icon} title={`Bus ${busNumber}`}>
+    <Marker
+      position={[lat, lng]}
+      icon={icon}
+      title={`Bus ${busNumber}`}
+      zIndexOffset={Z_OFFSET[status] + (selected ? SELECTED_Z_OFFSET : 0)}
+      eventHandlers={{ click: () => onSelect?.(busId) }}
+    >
       <Popup>
         <div className="text-sm">
           <p className="font-semibold">Bus {busNumber}</p>

@@ -31,7 +31,7 @@ export const BUS_STATUS_META: Record<
 > = {
   live: { label: "Moving", color: "#16a34a", badgeClass: "bg-green-100 text-green-700" },
   stopped: { label: "Stopped", color: "#ea580c", badgeClass: "bg-orange-100 text-orange-700" },
-  offline: { label: "Offline", color: "#6b7280", badgeClass: "bg-gray-100 text-gray-600" },
+  offline: { label: "Offline", color: "#64748b", badgeClass: "bg-gray-100 text-gray-600" },
   no_device: { label: "No tracker", color: "#9ca3af", badgeClass: "bg-gray-100 text-gray-500" }
 };
 
@@ -43,4 +43,20 @@ export const formatLastSeen = (lastSeen: string | null): string => {
   return Number.isNaN(date.getTime())
     ? "—"
     : date.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
+};
+
+const SHORT_LABEL_MAX = 8;
+
+/**
+ * Short code printed on the bus plate so it stays readable on the map,
+ * e.g. "KA-01-GF-01" -> "GF-01". The full number stays in the tooltip and popup.
+ */
+export const shortBusLabel = (busNumber: string): string => {
+  const trimmed = busNumber.trim();
+  if (trimmed.length <= SHORT_LABEL_MAX) {
+    return trimmed;
+  }
+  const parts = trimmed.split(/[\s\-_/]+/).filter(Boolean);
+  const candidate = parts.length >= 2 ? parts.slice(-2).join("-") : trimmed;
+  return candidate.length <= SHORT_LABEL_MAX ? candidate : candidate.slice(-SHORT_LABEL_MAX);
 };
