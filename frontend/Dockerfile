@@ -16,7 +16,9 @@ ENV BACKEND_URL=${BACKEND_URL}
 # NEXT_PUBLIC_* values are inlined into the browser bundle at build time, so they must be
 # build arguments (a runtime environment variable would have no effect on the client).
 # Public URL of the API as the browser reaches it (used by the live-tracking socket).
-ARG NEXT_PUBLIC_BACKEND_URL=http://localhost:5000
+# Leave empty when a reverse proxy serves the site and the API on one address (the browser
+# then uses its own origin); set it only when the API lives on a different address.
+ARG NEXT_PUBLIC_BACKEND_URL=
 ENV NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL}
 ENV NEXT_TELEMETRY_DISABLED=1
 
