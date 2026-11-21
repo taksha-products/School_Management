@@ -7,6 +7,17 @@ export interface Bus {
   capacity: number;
   status: "active" | "inactive";
   activeStudentCount?: number;
+  tracker?: BusTracker;
+}
+
+export type BusTrackerStatus = "none" | "pending" | "synced" | "failed" | "disabled";
+
+/** GPS tracker attached to a bus (managed from the platform; synced to Traccar by the API). */
+export interface BusTracker {
+  trackerId: string | null;
+  status: BusTrackerStatus;
+  error: string | null;
+  lastSeen: string | null;
 }
 
 export interface StudentTransportInfo {

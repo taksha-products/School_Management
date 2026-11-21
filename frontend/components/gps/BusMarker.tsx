@@ -4,18 +4,7 @@ import L from "leaflet";
 import { useMemo } from "react";
 import { Marker, Popup } from "react-leaflet";
 
-const OFFLINE_THRESHOLD_MS = 2 * 60 * 1000;
-
-const markerColor = (speed: number, timestamp: string): string => {
-  const age = Date.now() - new Date(timestamp).getTime();
-  if (Number.isNaN(age) || age > OFFLINE_THRESHOLD_MS) {
-    return "#6b7280";
-  }
-  if (speed > 0) {
-    return "#16a34a";
-  }
-  return "#ea580c";
-};
+import { BUS_STATUS_META, formatLastSeen, type LiveBusStatus } from "@/lib/busTracking";
 
 const createBusDivIcon = (bearing: number, color: string): L.DivIcon =>
   L.divIcon({
@@ -32,41 +21,40 @@ const createBusDivIcon = (bearing: number, color: string): L.DivIcon =>
 export interface BusMarkerProps {
   busId: string;
   busNumber: string;
+  routeName: string;
   lat: number;
   lng: number;
   speed: number;
   bearing: number;
-  timestamp: string;
+  timestamp: string | null;
+  status: LiveBusStatus;
 }
 
 export const BusMarker = ({
   busId,
   busNumber,
+  routeName,
   lat,
   lng,
   speed,
   bearing,
-  timestamp
+  timestamp,
+  status
 }: BusMarkerProps): JSX.Element => {
-  const icon = useMemo(
-    () => createBusDivIcon(bearing, markerColor(speed, timestamp)),
-    [bearing, speed, timestamp]
-  );
-
-  const updatedLabel = useMemo(() => {
-    const date = new Date(timestamp);
-    return Number.isNaN(date.getTime())
-      ? "—"
-      : date.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
-  }, [timestamp]);
+  const meta = BUS_STATUS_META[status];
+  const icon = useMemo(() => createBusDivIcon(bearing, meta.color), [bearing, meta.color]);
 
   return (
     <Marker key={busId} position={[lat, lng]} icon={icon}>
       <Popup>
         <div className="text-sm">
           <p className="font-semibold">Bus {busNumber}</p>
-          <p>Speed: {speed.toFixed(1)} km/h</p>
-          <p className="text-slate-500">Updated: {updatedLabel}</p>
+          {routeName && <p className="text-slate-500">{routeName}</p>}
+          <p>
+            {meta.label}
+            {status === "live" ? ` · ${speed.toFixed(1)} km/h` : ""}
+          </p>
+          <p className="text-slate-500">Updated: {formatLastSeen(timestamp)}</p>
         </div>
       </Popup>
     </Marker>

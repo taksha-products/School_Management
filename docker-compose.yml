@@ -1,0 +1,34 @@
+# Traccar GPS server (stock image, configured through environment variables).
+# Start:  docker compose up -d      Stop:  docker compose down
+# Web UI: http://localhost:8082     Phone app (OsmAnd) port: 5055
+#
+# Traccar forwards every position to the backend webhook below.
+# Override the target with TRACCAR_FORWARD_URL in a root .env file if needed.
+
+services:
+  traccar:
+    image: traccar/traccar:latest
+    container_name: traccar
+    restart: unless-stopped
+    ports:
+      - "8082:8082"   # web UI + REST API (used by the backend to register devices)
+      - "5055:5055"   # OsmAnd protocol (Traccar Client phone app)
+      - "5027:5027"   # GPS hardware protocol port (add the port your device model uses)
+    environment:
+      CONFIG_USE_ENVIRONMENT_VARIABLES: "true"
+      FORWARD_ENABLE: "true"
+      FORWARD_JSON: "true"
+      # The backend authenticates Traccar with ?key=<TRACCAR_WEBHOOK_SECRET> (set the same
+      # value in backend/.env and in the root .env that docker compose reads).
+      FORWARD_URL: ${TRACCAR_FORWARD_URL:-http://host.docker.internal:5000/api/traccar-webhook/webhook/traccar}?key=${TRACCAR_WEBHOOK_SECRET:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - traccar-data:/opt/traccar/data
+      - traccar-logs:/opt/traccar/logs
+
+volumes:
+  traccar-data:
+    name: traccar-data
+  traccar-logs:
+    name: traccar-logs

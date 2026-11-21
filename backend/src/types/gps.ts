@@ -38,17 +38,24 @@ export interface GpsPositionUpdateMessage {
   timestamp: string;
 }
 
-export interface LiveBusPosition {
+export type LiveBusStatus = "live" | "stopped" | "offline" | "no_device";
+
+/** One active bus with its last known position (cached; status is derived per request). */
+export interface LiveBusRow {
   busId: string;
   busNumber: string;
   routeName: string;
-  deviceId: string;
+  deviceId: string | null;
   lat: number | null;
   lng: number | null;
   speed: number | null;
   bearing: number | null;
   lastSeen: string | null;
   batteryLevel: number | null;
+}
+
+export interface LiveBusPosition extends LiveBusRow {
+  status: LiveBusStatus;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

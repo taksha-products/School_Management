@@ -5,11 +5,12 @@ import { auth, type AuthenticatedRequest } from "../middleware/auth";
 import { orgScope } from "../middleware/orgScope";
 import { requireOrgScope } from "../middleware/requireOrgScope";
 import { canAccessOrg, isOrgAdmin } from "../middleware/roleCheck";
+import { requireTraccarWebhookSecret } from "../middleware/traccarWebhookAuth";
 import { Bus } from "../models/Bus";
 import { GpsDevice } from "../models/GpsDevice";
 import { GpsLog } from "../models/GpsLog";
 import { publishGpsPositionUpdate } from "../services/gpsPubSub";
-import type { LiveBusPosition } from "../types/gps";
+import type { LiveBusPosition, LiveBusRow, LiveBusStatus } from "../types/gps";
 import {
   knotsToKmh,
   parseTraccarPositionForwarderPayload,
@@ -21,6 +22,10 @@ import { getScopedOrganizationId, orgFilter } from "../utils/orgFilter";
 import { paginate, parsePaginationQuery } from "../utils/paginate";
 
 const LIVE_POSITIONS_TTL_SECONDS = 10;
+/** A bus with no position update for this long is considered offline. */
+const OFFLINE_AFTER_MS = 2 * 60 * 1000;
+/** Above this speed (km/h) a bus counts as moving. */
+const MOVING_SPEED_KMH = 1;
 
 const scopeMiddleware = [auth, orgScope, requireOrgScope, canAccessOrg] as const;
 
@@ -40,10 +45,9 @@ export const traccarWebhookRouter = Router();
 
 traccarWebhookRouter.post(
   "/webhook/traccar",
+  requireTraccarWebhookSecret,
   asyncHandler(async (req, res) => {
     const body: unknown = req.body;
-    // eslint-disable-next-line no-console
-    console.log("Traccar webhook received:", JSON.stringify(body).slice(0, 200));
 
     try {
       const position = parseTraccarPositionForwarderPayload(body);
@@ -60,7 +64,10 @@ traccarWebhookRouter.post(
         return;
       }
 
-      const device = await GpsDevice.findOne({ traccarDeviceId: position.deviceId });
+      const device = await GpsDevice.findOne({
+        traccarDeviceId: position.deviceId,
+        isActive: true
+      });
       if (!device) {
         // eslint-disable-next-line no-console
         console.warn("Traccar webhook: unknown device", {
@@ -131,50 +138,85 @@ traccarWebhookRouter.post(
 
 export const gpsRouter = Router();
 
+const requireStaffLevelAccess = (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): void => {
+  const role = req.user?.role;
+  if (role === "superAdmin" || role === "orgAdmin" || role === "staff") {
+    next();
+    return;
+  }
+  res.status(403).json({
+    success: false,
+    data: null,
+    message: "Forbidden: live tracking of all buses is restricted to school staff"
+  });
+};
+
+const deriveTrackingStatus = (row: LiveBusRow, now: number): LiveBusStatus => {
+  if (!row.deviceId) {
+    return "no_device";
+  }
+  if (!row.lastSeen) {
+    return "offline";
+  }
+  const age = now - new Date(row.lastSeen).getTime();
+  if (Number.isNaN(age) || age > OFFLINE_AFTER_MS) {
+    return "offline";
+  }
+  return (row.speed ?? 0) > MOVING_SPEED_KMH ? "live" : "stopped";
+};
+
 gpsRouter.get(
   "/buses/live",
   ...scopeMiddleware,
+  requireStaffLevelAccess,
   asyncHandler(async (req, res) => {
     const authReq = req as AuthenticatedRequest;
     const orgId = getScopedOrganizationId(authReq, res)!;
     const cacheKey = orgCacheKey(orgId, "live_positions");
 
-    const cached = await getCached<LiveBusPosition[]>(cacheKey);
-    if (cached) {
-      res.json({
-        success: true,
-        data: cached,
-        message: "Live bus positions fetched successfully"
+    let rows = await getCached<LiveBusRow[]>(cacheKey);
+
+    if (!rows) {
+      const filter = orgFilter(authReq, res);
+      const [buses, devices] = await Promise.all([
+        Bus.find({ ...filter, status: "active" })
+          .select("busNumber routeName")
+          .sort({ busNumber: 1 })
+          .lean(),
+        GpsDevice.find({ ...filter, isActive: true }).lean()
+      ]);
+
+      const deviceByBus = new Map(devices.map((device) => [String(device.busId), device]));
+
+      rows = buses.map((bus): LiveBusRow => {
+        const device = deviceByBus.get(String(bus._id));
+        return {
+          busId: String(bus._id),
+          busNumber: bus.busNumber,
+          routeName: bus.routeName,
+          deviceId: device ? String(device._id) : null,
+          lat: device?.lastLat ?? null,
+          lng: device?.lastLng ?? null,
+          speed: device?.lastSpeed ?? null,
+          bearing: device?.lastBearing ?? null,
+          lastSeen: device?.lastSeen ? device.lastSeen.toISOString() : null,
+          batteryLevel: device?.batteryLevel ?? null
+        };
       });
-      return;
+
+      await setCached(cacheKey, rows, LIVE_POSITIONS_TTL_SECONDS);
     }
 
-    const devices = await GpsDevice.find({
-      ...orgFilter(authReq, res),
-      isActive: true
-    }).populate<{ busId: { busNumber: string; routeName: string } | null }>("busId", "busNumber routeName");
-
-    const data: LiveBusPosition[] = devices.map((device) => {
-      const bus =
-        device.busId && typeof device.busId === "object" && "busNumber" in device.busId
-          ? device.busId
-          : null;
-
-      return {
-        busId: device.busId instanceof Types.ObjectId ? device.busId.toString() : String(device.busId),
-        busNumber: bus?.busNumber ?? "—",
-        routeName: bus?.routeName ?? "—",
-        deviceId: device._id.toString(),
-        lat: device.lastLat ?? null,
-        lng: device.lastLng ?? null,
-        speed: device.lastSpeed ?? null,
-        bearing: device.lastBearing ?? null,
-        lastSeen: device.lastSeen ? device.lastSeen.toISOString() : null,
-        batteryLevel: device.batteryLevel ?? null
-      };
-    });
-
-    await setCached(cacheKey, data, LIVE_POSITIONS_TTL_SECONDS);
+    // Status depends on "now", so it is derived on every request, not cached.
+    const now = Date.now();
+    const data: LiveBusPosition[] = rows.map((row) => ({
+      ...row,
+      status: deriveTrackingStatus(row, now)
+    }));
 
     res.json({
       success: true,

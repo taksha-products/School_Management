@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Response } from "express";
 import { Types } from "mongoose";
 
 import { auth, type AuthenticatedRequest } from "../middleware/auth";
@@ -9,15 +9,53 @@ import {
   isOrgAdminOrStaffAny,
   isSuperAdminOrOrgStaff
 } from "../middleware/roleCheck";
-import { Bus } from "../models/Bus";
+import { Bus, type IBus } from "../models/Bus";
+import { GpsDevice } from "../models/GpsDevice";
+import {
+  assertTrackerAvailable,
+  noTracker,
+  normalizeTrackerId,
+  retryBusTrackerSync,
+  syncBusTracker,
+  toTrackerView,
+  TrackerConflictError,
+  type BusTrackerView
+} from "../services/busTrackerService";
 import { asyncHandler } from "../utils/asyncHandler";
 import { validate } from "../middleware/validate";
 import { getScopedOrganizationId, orgFilter } from "../utils/orgFilter";
-import { createBusValidation } from "../validators/buses";
+import { createBusValidation, updateBusValidation } from "../validators/buses";
 
 const busesRouter = Router();
 
 const scopeMiddleware = [auth, orgScope, requireOrgScope, canAccessOrg] as const;
+
+/** Fields an admin may change on a bus (everything else in the body is ignored). */
+const UPDATABLE_BUS_FIELDS = [
+  "busNumber",
+  "routeName",
+  "driverName",
+  "driverPhone",
+  "capacity",
+  "status"
+] as const;
+
+const pickBusUpdates = (body: Record<string, unknown>): Record<string, unknown> => {
+  const updates: Record<string, unknown> = {};
+  for (const field of UPDATABLE_BUS_FIELDS) {
+    if (body[field] !== undefined) {
+      updates[field] = body[field];
+    }
+  }
+  if (typeof updates.busNumber === "string") {
+    updates.busNumber = updates.busNumber.trim();
+  }
+  return updates;
+};
+
+const respondTrackerConflict = (res: Response, error: TrackerConflictError): void => {
+  res.status(409).json({ success: false, data: null, message: error.message });
+};
 
 busesRouter.get(
   "/",
@@ -57,6 +95,27 @@ busesRouter.get(
         }
       },
       {
+        $lookup: {
+          from: "gpsdevices",
+          let: { busId: "$_id", orgId: "$organizationId" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$busId", "$$busId"] },
+                    { $eq: ["$organizationId", "$$orgId"] }
+                  ]
+                }
+              }
+            },
+            { $limit: 1 }
+          ],
+          as: "trackerDevice"
+        }
+      },
+      { $addFields: { trackerDevice: { $first: "$trackerDevice" } } },
+      {
         $project: {
           organizationId: 1,
           busNumber: 1,
@@ -66,6 +125,24 @@ busesRouter.get(
           capacity: 1,
           status: 1,
           activeStudentCount: { $size: "$activeStudents" },
+          tracker: {
+            $cond: [
+              { $ifNull: ["$trackerDevice", false] },
+              {
+                trackerId: "$trackerDevice.traccarUniqueId",
+                status: {
+                  $cond: [
+                    { $eq: ["$trackerDevice.isActive", false] },
+                    "disabled",
+                    "$trackerDevice.syncStatus"
+                  ]
+                },
+                error: { $ifNull: ["$trackerDevice.syncError", null] },
+                lastSeen: { $ifNull: ["$trackerDevice.lastSeen", null] }
+              },
+              noTracker
+            ]
+          },
           createdAt: 1,
           updatedAt: 1
         }
@@ -95,7 +172,12 @@ busesRouter.get(
       res.status(404).json({ success: false, data: null, message: "Bus not found" });
       return;
     }
-    res.json({ success: true, data: bus, message: "Bus fetched successfully" });
+    const device = await GpsDevice.findOne({ busId: bus._id, organizationId: bus.organizationId });
+    res.json({
+      success: true,
+      data: { ...bus.toObject(), tracker: toTrackerView(device) },
+      message: "Bus fetched successfully"
+    });
   })
 );
 
@@ -132,12 +214,43 @@ busesRouter.post(
       return;
     }
 
+    const trackerId = normalizeTrackerId((req.body as Record<string, unknown>).trackerId);
+    if (typeof trackerId === "string") {
+      try {
+        await assertTrackerAvailable(trackerId);
+      } catch (error) {
+        if (error instanceof TrackerConflictError) {
+          respondTrackerConflict(res, error);
+          return;
+        }
+        throw error;
+      }
+    }
+
     const bus = await Bus.create({
-      ...req.body,
+      ...pickBusUpdates(req.body as Record<string, unknown>),
       busNumber,
       organizationId: new Types.ObjectId(orgId)
     });
-    res.status(201).json({ success: true, data: bus, message: "Bus created successfully" });
+
+    let tracker: BusTrackerView = noTracker;
+    if (trackerId !== undefined) {
+      try {
+        tracker = await syncBusTracker({ organizationId: orgId, bus, trackerId });
+      } catch (error) {
+        if (!(error instanceof TrackerConflictError)) {
+          throw error;
+        }
+        // Lost a race with another request for the same tracker ID; bus is saved without it.
+        tracker = { ...noTracker, error: error.message };
+      }
+    }
+
+    res.status(201).json({
+      success: true,
+      data: { ...bus.toObject(), tracker },
+      message: "Bus created successfully"
+    });
   })
 );
 
@@ -145,17 +258,19 @@ busesRouter.put(
   "/:id",
   ...scopeMiddleware,
   isSuperAdminOrOrgStaff("canManageBuses"),
+  updateBusValidation,
+  validate,
   asyncHandler(async (req, res) => {
     const authReq = req as AuthenticatedRequest;
-    const orgId = getScopedOrganizationId(authReq, res);
-    const updates = { ...req.body } as Record<string, unknown>;
-    delete updates.organizationId;
+    const orgId = getScopedOrganizationId(authReq, res)!;
+    const body = req.body as Record<string, unknown>;
+    const updates = pickBusUpdates(body);
+    const trackerId = normalizeTrackerId(body.trackerId);
 
     if (typeof updates.busNumber === "string") {
-      const busNumber = updates.busNumber.trim();
       const duplicate = await Bus.findOne({
-        organizationId: new Types.ObjectId(orgId!),
-        busNumber,
+        organizationId: new Types.ObjectId(orgId),
+        busNumber: updates.busNumber,
         _id: { $ne: req.params.id }
       }).select("_id");
 
@@ -167,8 +282,18 @@ busesRouter.put(
         });
         return;
       }
+    }
 
-      updates.busNumber = busNumber;
+    if (typeof trackerId === "string") {
+      try {
+        await assertTrackerAvailable(trackerId, new Types.ObjectId(String(req.params.id)));
+      } catch (error) {
+        if (error instanceof TrackerConflictError) {
+          respondTrackerConflict(res, error);
+          return;
+        }
+        throw error;
+      }
     }
 
     const bus = await Bus.findOneAndUpdate(
@@ -180,7 +305,41 @@ busesRouter.put(
       res.status(404).json({ success: false, data: null, message: "Bus not found" });
       return;
     }
-    res.json({ success: true, data: bus, message: "Bus updated successfully" });
+
+    let tracker: BusTrackerView;
+    try {
+      tracker = await syncBusTracker({ organizationId: orgId, bus, trackerId });
+    } catch (error) {
+      if (!(error instanceof TrackerConflictError)) {
+        throw error;
+      }
+      tracker = { ...noTracker, error: error.message };
+    }
+
+    res.json({
+      success: true,
+      data: { ...bus.toObject(), tracker },
+      message: "Bus updated successfully"
+    });
+  })
+);
+
+busesRouter.post(
+  "/:id/tracker/sync",
+  ...scopeMiddleware,
+  isSuperAdminOrOrgStaff("canManageBuses"),
+  asyncHandler(async (req, res) => {
+    const authReq = req as AuthenticatedRequest;
+    const orgId = getScopedOrganizationId(authReq, res)!;
+
+    const bus: IBus | null = await Bus.findOne({ _id: req.params.id, ...orgFilter(authReq, res) });
+    if (!bus) {
+      res.status(404).json({ success: false, data: null, message: "Bus not found" });
+      return;
+    }
+
+    const tracker = await retryBusTrackerSync(orgId, bus);
+    res.json({ success: true, data: { tracker }, message: "Tracker sync attempted" });
   })
 );
 
