@@ -271,18 +271,6 @@ export const Sidebar = ({
     setOpenSection((prev) => (prev === href ? null : href));
   }, []);
 
-  if (legacyItems) {
-    return (
-      <LegacySidebar
-        items={legacyItems}
-        brand={brand}
-        roleBadge={roleBadge}
-        collapsed={collapsed}
-        whiteLabel={whiteLabel}
-      />
-    );
-  }
-
   const navContent = useMemo(() => {
     const visibleItems = items.filter(
       (item) => !item.featureFlag || enabledFeatures.includes(item.featureFlag)
@@ -419,6 +407,18 @@ export const Sidebar = ({
     enabledFeatures,
     onMobileClose
   ]);
+
+  if (legacyItems) {
+    return (
+      <LegacySidebar
+        items={legacyItems}
+        brand={brand}
+        roleBadge={roleBadge}
+        collapsed={collapsed}
+        whiteLabel={whiteLabel}
+      />
+    );
+  }
 
   return (
     <>

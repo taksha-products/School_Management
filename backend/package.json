@@ -9,6 +9,8 @@
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "build": "npm install --include=dev --no-audit --no-fund && tsc",
     "start": "node dist/server.js",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "seed": "ts-node src/seed.ts",
     "ensure-indexes": "ts-node src/scripts/ensureIndexes.ts",
     "migrate-org-grades": "ts-node src/scripts/migrateOrgGrades.ts",
