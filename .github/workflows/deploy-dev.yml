@@ -57,7 +57,10 @@ jobs:
   docker:
     name: Build, scan & push
     needs: ci
-    runs-on: ubuntu-latest
+    # Oracle VM is Ampere (linux/arm64). Build natively on ARM runners so
+    # docker pull on the host matches — amd64-only tags fail with
+    # "no matching manifest for linux/arm64".
+    runs-on: ubuntu-24.04-arm
     outputs:
       image_tag: ${{ steps.meta.outputs.sha }}
     steps:
@@ -83,10 +86,12 @@ jobs:
           context: ./backend
           file: ./backend/Dockerfile
           push: true
+          platforms: linux/arm64
+          provenance: false
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/school-management-backend:${{ steps.meta.outputs.sha }}
-          cache-from: type=gha,scope=backend
-          cache-to: type=gha,mode=max,scope=backend
+          cache-from: type=gha,scope=backend-arm64
+          cache-to: type=gha,mode=max,scope=backend-arm64
 
       - name: Build frontend image
         uses: docker/build-push-action@v6
@@ -94,12 +99,14 @@ jobs:
           context: ./frontend
           file: ./frontend/Dockerfile
           push: true
+          platforms: linux/arm64
+          provenance: false
           build-args: |
             BACKEND_URL=http://backend:5000
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/school-management-frontend:${{ steps.meta.outputs.sha }}
-          cache-from: type=gha,scope=frontend
-          cache-to: type=gha,mode=max,scope=frontend
+          cache-from: type=gha,scope=frontend-arm64
+          cache-to: type=gha,mode=max,scope=frontend-arm64
 
       - name: Trivy — backend image
         uses: aquasecurity/trivy-action@v0.36.0
@@ -137,6 +144,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Keep compose + nginx config on the VM in sync (images alone are not enough)
+      - name: Sync compose files to VM
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEV_HOST }}
+          username: ${{ secrets.DEV_USER }}
+          key: ${{ secrets.DEV_SSH_KEY }}
+          source: "docker-compose.dev-nginx.yml,nginx/dev-nginx.conf"
+          target: ${{ secrets.DEV_APP_PATH }}
+          overwrite: true
+
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.2.0
         with:
@@ -146,6 +164,16 @@ jobs:
           script: |
             set -euo pipefail
             cd "${{ secrets.DEV_APP_PATH }}"
+
+            if [ ! -f docker-compose.dev-nginx.yml ]; then
+              echo "ERROR: docker-compose.dev-nginx.yml missing in DEV_APP_PATH"
+              ls -la
+              exit 1
+            fi
+            if [ ! -f .env ]; then
+              echo "ERROR: .env missing in DEV_APP_PATH — create it on the VM before deploy"
+              exit 1
+            fi
 
             export DOCKERHUB_USERNAME="${{ secrets.DOCKERHUB_USERNAME }}"
             export IMAGE_TAG="${{ needs.docker.outputs.image_tag }}"
