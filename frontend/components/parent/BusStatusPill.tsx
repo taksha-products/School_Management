@@ -1,5 +1,7 @@
 "use client";
 
+import { Gauge, Pause, WifiOff, type LucideIcon } from "lucide-react";
+
 import { useNow } from "@/hooks/useNow";
 import { BUS_STATUS_META, formatDuration } from "@/lib/busTracking";
 import { cn } from "@/lib/utils";
@@ -27,24 +29,32 @@ export const BusStatusPill = ({ position }: { position: ParentBusPosition }): JS
 
   let label: string;
   let tone: string;
+  let Icon: LucideIcon;
   if (stale) {
     label = "No recent signal";
     tone = "bg-gray-100 text-gray-600";
+    Icon = WifiOff;
   } else if (position.status === "live") {
     label = `Moving ${Math.round(position.speed)} km/h`;
     tone = meta.badgeClass;
+    Icon = Gauge;
   } else {
     const stoppedMs = position.stoppedSince ? now - new Date(position.stoppedSince).getTime() : 0;
     label = stoppedMs >= 60_000 ? `Stopped for ${formatDuration(stoppedMs)}` : "Stopped";
     tone = meta.badgeClass;
+    Icon = Pause;
   }
 
   return (
     <span
       role="status"
       aria-live="polite"
-      className={cn("whitespace-nowrap rounded-full px-3 py-1 text-sm font-semibold", tone)}
+      className={cn(
+        "inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-semibold",
+        tone
+      )}
     >
+      <Icon aria-hidden="true" className="h-4 w-4" />
       {label}
     </span>
   );

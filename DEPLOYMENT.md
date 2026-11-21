@@ -45,7 +45,13 @@ docker build ./frontend \
 ## Staging on the Oracle VM (docker-compose.dev-nginx.yml)
 
 - nginx serves the site, the API and `/socket.io/` on **one address**. The frontend image is built without `NEXT_PUBLIC_BACKEND_URL`, so the browser uses its own origin.
-- **GPS tracking is not part of the staging deployment.** The staging compose file has no Traccar service. The backend starts normally without Traccar and GPS stays inactive (the `gpsTracking` feature flag is off per school). To run GPS locally use `docker-compose.yml`; to add it to a server later, add a Traccar service and set `TRACCAR_URL`, `TRACCAR_TOKEN` and `TRACCAR_WEBHOOK_SECRET` (see the variables above).
+- The compose file includes Traccar (`traccar/traccar:6.17.0`, amd64 and arm64). It forwards every position to the backend over the internal network. The deploy pipeline syncs the compose file and runs `docker compose up -d`, so Traccar starts with the next deploy.
+- **One-time setup on the VM** (GPS stays inactive until this is done; everything else works):
+  1. Add `TRACCAR_WEBHOOK_SECRET=<long random string>` to the server `.env`, then deploy.
+  2. Reach the Traccar UI through a tunnel: `ssh -L 8082:127.0.0.1:8082 user@vm`, open `http://localhost:8082`, create the admin account, then generate a token (account menu, Preferences, Token).
+  3. Add `TRACCAR_TOKEN=<token>` to `.env` and restart the backend: `docker compose -f docker-compose.dev-nginx.yml up -d backend`.
+  4. Open tracker port **5055** (Traccar Client phone app) in the cloud security list and the VM firewall. The Traccar UI (8082) stays bound to `127.0.0.1`.
+  5. Turn on `gpsTracking` for the school (super admin screen), add a bus, and give it a tracker.
 
 ## Requirements and behaviour to know
 
