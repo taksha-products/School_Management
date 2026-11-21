@@ -1,4 +1,9 @@
+import path from "path";
+import { fileURLToPath } from "url";
+
 /** @type {import('next').NextConfig} */
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const normalizeBackendUrl = (raw) => {
   const fallback = "http://localhost:5000";
@@ -13,6 +18,9 @@ const getBackendUrl = () =>
   normalizeBackendUrl(process.env.BACKEND_URL ?? process.env.NEXT_PUBLIC_BACKEND_URL);
 
 const nextConfig = {
+  // Lean production image for Docker / Trivy (copies only standalone server + assets)
+  output: "standalone",
+  outputFileTracingRoot: path.join(__dirname),
   async rewrites() {
     const backendUrl = getBackendUrl();
     return [

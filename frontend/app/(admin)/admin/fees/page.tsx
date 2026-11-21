@@ -1,20 +1,22 @@
 import { redirect } from "next/navigation";
 
 interface FeesPageProps {
-  searchParams?: {
+  searchParams?: Promise<{
     studentId?: string;
     tab?: string;
-  };
+  }>;
 }
 
-const FeesPage = ({ searchParams }: FeesPageProps): never => {
-  if (searchParams?.studentId) {
-    if (searchParams.tab === "transport") {
+const FeesPage = async ({ searchParams }: FeesPageProps): Promise<never> => {
+  const resolved = (await searchParams) ?? {};
+
+  if (resolved.studentId) {
+    if (resolved.tab === "transport") {
       redirect("/admin/fees/collect?tab=transport");
     }
-    redirect(`/admin/fees/collect/${searchParams.studentId}`);
+    redirect(`/admin/fees/collect/${resolved.studentId}`);
   }
-  if (searchParams?.tab === "transport") {
+  if (resolved.tab === "transport") {
     redirect("/admin/fees/collect?tab=transport");
   }
 
