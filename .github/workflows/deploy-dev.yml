@@ -137,6 +137,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Keep compose + nginx config on the VM in sync (images alone are not enough)
+      - name: Sync compose files to VM
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEV_HOST }}
+          username: ${{ secrets.DEV_USER }}
+          key: ${{ secrets.DEV_SSH_KEY }}
+          source: "docker-compose.dev-nginx.yml,nginx/dev-nginx.conf"
+          target: ${{ secrets.DEV_APP_PATH }}
+          overwrite: true
+
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.2.0
         with:
@@ -146,6 +157,16 @@ jobs:
           script: |
             set -euo pipefail
             cd "${{ secrets.DEV_APP_PATH }}"
+
+            if [ ! -f docker-compose.dev-nginx.yml ]; then
+              echo "ERROR: docker-compose.dev-nginx.yml missing in DEV_APP_PATH"
+              ls -la
+              exit 1
+            fi
+            if [ ! -f .env ]; then
+              echo "ERROR: .env missing in DEV_APP_PATH — create it on the VM before deploy"
+              exit 1
+            fi
 
             export DOCKERHUB_USERNAME="${{ secrets.DOCKERHUB_USERNAME }}"
             export IMAGE_TAG="${{ needs.docker.outputs.image_tag }}"
