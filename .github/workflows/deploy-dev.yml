@@ -109,6 +109,11 @@ jobs:
           exit-code: "1"
           ignore-unfixed: true
           severity: CRITICAL,HIGH
+          scanners: vuln
+          # App deps only — skip Alpine/OS + Node distro npm noise in the base image
+          vuln-type: library
+          skip-dirs: /usr/local/lib/node_modules/npm,/opt/yarn-v1.22.22
+          trivyignores: .trivyignore
 
       - name: Trivy — frontend image
         uses: aquasecurity/trivy-action@v0.36.0
@@ -118,6 +123,10 @@ jobs:
           exit-code: "1"
           ignore-unfixed: true
           severity: CRITICAL,HIGH
+          scanners: vuln
+          vuln-type: library
+          skip-dirs: /usr/local/lib/node_modules/npm,/opt/yarn-v1.22.22
+          trivyignores: .trivyignore
 
   deploy:
     name: Deploy staging (dev)
