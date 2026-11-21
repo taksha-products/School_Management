@@ -102,7 +102,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=frontend
 
       - name: Trivy — backend image
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ secrets.DOCKERHUB_USERNAME }}/school-management-backend:${{ steps.meta.outputs.sha }}
           format: table
@@ -111,7 +111,7 @@ jobs:
           severity: CRITICAL,HIGH
 
       - name: Trivy — frontend image
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ secrets.DOCKERHUB_USERNAME }}/school-management-frontend:${{ steps.meta.outputs.sha }}
           format: table
