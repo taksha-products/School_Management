@@ -91,7 +91,7 @@ services:
     environment:
       CONFIG_USE_ENVIRONMENT_VARIABLES: "true"
       FORWARD_ENABLE: "true"
-      FORWARD_JSON: "true"
+      FORWARD_TYPE: "json"   # POST JSON (not the URL-template GET mode)
       # Default targets a backend running on the host (npm run dev). When the backend runs
       # in this compose file, set TRACCAR_FORWARD_URL=http://backend:5000/api/traccar-webhook/webhook/traccar
       FORWARD_URL: ${TRACCAR_FORWARD_URL:-http://host.docker.internal:5000/api/traccar-webhook/webhook/traccar}?key=${TRACCAR_WEBHOOK_SECRET:-}

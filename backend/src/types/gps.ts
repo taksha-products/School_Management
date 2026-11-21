@@ -6,7 +6,7 @@ export interface TraccarPositionAttributes {
   [key: string]: unknown;
 }
 
-/** Flat JSON body sent by Traccar position forwarder (`forward.enable` in traccar.xml). */
+/** Position fields sent by the Traccar position forwarder (`forward.enable`, `forward.type=json`). */
 export interface TraccarPositionForwarderPayload {
   deviceId: number;
   valid: boolean;
@@ -104,6 +104,10 @@ const parseAttributes = (value: unknown): TraccarPositionAttributes | undefined 
   return Object.keys(attributes).length > 0 ? attributes : undefined;
 };
 
+/**
+ * Parses a Traccar position forwarder body. Traccar (forward.type=json) sends
+ * `{ "position": {...}, "device": {...} }`; a flat position object is also accepted.
+ */
 export const parseTraccarPositionForwarderPayload = (
   body: unknown
 ): TraccarPositionForwarderPayload | null => {
@@ -111,12 +115,14 @@ export const parseTraccarPositionForwarderPayload = (
     return null;
   }
 
-  const deviceId = parseFiniteNumber(body.deviceId);
-  const valid = body.valid;
-  const latitude = parseFiniteNumber(body.latitude);
-  const longitude = parseFiniteNumber(body.longitude);
-  const speed = parseFiniteNumber(body.speed);
-  const course = parseFiniteNumber(body.course);
+  const source = isRecord(body.position) ? body.position : body;
+
+  const deviceId = parseFiniteNumber(source.deviceId);
+  const valid = source.valid;
+  const latitude = parseFiniteNumber(source.latitude);
+  const longitude = parseFiniteNumber(source.longitude);
+  const speed = parseFiniteNumber(source.speed);
+  const course = parseFiniteNumber(source.course);
 
   if (
     deviceId === undefined ||
@@ -136,12 +142,12 @@ export const parseTraccarPositionForwarderPayload = (
     longitude,
     speed,
     course,
-    accuracy: parseFiniteNumber(body.accuracy),
-    altitude: parseFiniteNumber(body.altitude),
-    fixTime: typeof body.fixTime === "string" ? body.fixTime : undefined,
-    deviceTime: typeof body.deviceTime === "string" ? body.deviceTime : undefined,
-    serverTime: typeof body.serverTime === "string" ? body.serverTime : undefined,
-    attributes: parseAttributes(body.attributes)
+    accuracy: parseFiniteNumber(source.accuracy),
+    altitude: parseFiniteNumber(source.altitude),
+    fixTime: typeof source.fixTime === "string" ? source.fixTime : undefined,
+    deviceTime: typeof source.deviceTime === "string" ? source.deviceTime : undefined,
+    serverTime: typeof source.serverTime === "string" ? source.serverTime : undefined,
+    attributes: parseAttributes(source.attributes)
   };
 };
 
