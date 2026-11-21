@@ -46,11 +46,11 @@ const ParentLayout = ({ children }: { children: ReactNode }): JSX.Element => {
     <OrgThemeProvider>
       <div className="min-h-screen bg-[#F7F8F9]">
         <header className="sticky top-0 z-30 border-b border-gray-200 bg-white/95 backdrop-blur">
-          <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-4 px-6 py-3">
-            <Link href="/parent/dashboard" className="flex min-w-0 items-center">
+          <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-2 sm:px-6 sm:py-3">
+            <Link href="/parent/dashboard" className="order-1 flex min-w-0 items-center">
               <BrandLogo />
             </Link>
-            <nav className="flex flex-wrap items-center gap-1">
+            <nav className="order-3 -mx-1 flex w-full items-center gap-1 overflow-x-auto sm:order-2 sm:mx-0 sm:w-auto sm:overflow-visible">
               {links.map((l) => {
                 const active = pathname === l.match || pathname.startsWith(`${l.match}/`);
                 return (
@@ -58,7 +58,7 @@ const ParentLayout = ({ children }: { children: ReactNode }): JSX.Element => {
                     key={l.href}
                     href={l.href}
                     className={cn(
-                      "rounded-full px-3.5 py-2 text-sm font-semibold transition",
+                      "shrink-0 rounded-full px-3.5 py-2 text-sm font-semibold transition",
                       active
                         ? "bg-primary-50 text-primary"
                         : "text-gray-600 hover:bg-gray-50 hover:text-primary"
@@ -69,7 +69,7 @@ const ParentLayout = ({ children }: { children: ReactNode }): JSX.Element => {
                 );
               })}
             </nav>
-            <div className="flex items-center gap-3">
+            <div className="order-2 flex items-center gap-3 sm:order-3">
               <Link
                 href="/parent/account"
                 className="hidden text-sm text-gray-600 hover:text-primary sm:inline"
@@ -88,7 +88,7 @@ const ParentLayout = ({ children }: { children: ReactNode }): JSX.Element => {
         </header>
         <main
           className={cn(
-            "mx-auto max-w-5xl px-6 py-8",
+            "mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8",
             isChildOrReceipt && "pt-6"
           )}
         >
