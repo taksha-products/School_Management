@@ -102,22 +102,31 @@ jobs:
           cache-to: type=gha,mode=max,scope=frontend
 
       - name: Trivy — backend image
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ secrets.DOCKERHUB_USERNAME }}/school-management-backend:${{ steps.meta.outputs.sha }}
           format: table
           exit-code: "1"
           ignore-unfixed: true
           severity: CRITICAL,HIGH
+          scanners: vuln
+          # App deps only — skip Alpine/OS + Node distro npm noise in the base image
+          vuln-type: library
+          skip-dirs: /usr/local/lib/node_modules/npm,/opt/yarn-v1.22.22
+          trivyignores: .trivyignore
 
       - name: Trivy — frontend image
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ secrets.DOCKERHUB_USERNAME }}/school-management-frontend:${{ steps.meta.outputs.sha }}
           format: table
           exit-code: "1"
           ignore-unfixed: true
           severity: CRITICAL,HIGH
+          scanners: vuln
+          vuln-type: library
+          skip-dirs: /usr/local/lib/node_modules/npm,/opt/yarn-v1.22.22
+          trivyignores: .trivyignore
 
   deploy:
     name: Deploy staging (dev)
