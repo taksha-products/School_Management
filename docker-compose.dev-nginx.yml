@@ -1,0 +1,79 @@
+# Staging / dev deploy (with nginx) — pin Docker Hub images by git SHA (never :latest).
+#
+# Image repos are fixed here; only DOCKERHUB_USERNAME + IMAGE_TAG change per env/deploy.
+#
+# Server .env:
+#   DOCKERHUB_USERNAME=yourdockerhubuser
+#   IMAGE_TAG=<git-sha>          # CI sets this on deploy
+#   FRONTEND_URL=http://161.118.189.111   # CORS allowlist (web origin)
+#   NEXT_PUBLIC_BACKEND_URL=http://161.118.189.111
+#   COOKIE_SECURE=false          # true only with HTTPS
+#
+#   docker compose -f docker-compose.dev-nginx.yml pull
+#   docker compose -f docker-compose.dev-nginx.yml up -d
+#
+# Public URL opens at / → redirects to /parent/login (dev-nginx).
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - taksha_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  backend:
+    image: ${DOCKERHUB_USERNAME}/school-management-backend:${IMAGE_TAG}
+    restart: unless-stopped
+    expose:
+      - "5000"
+    env_file:
+      - .env
+    environment:
+      PORT: "5000"
+      REDIS_URL: redis://redis:6379
+      NODE_ENV: production
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      OTP_DEBUG: ${OTP_DEBUG:-false}
+      # CORS allowlist — browser web origin(s) only. Native mobile does not use CORS.
+      FRONTEND_URL: ${FRONTEND_URL}
+    volumes:
+      - taksha_logos:/app/public/logos
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  frontend:
+    image: ${DOCKERHUB_USERNAME}/school-management-frontend:${IMAGE_TAG}
+    restart: unless-stopped
+    expose:
+      - "3000"
+    environment:
+      NODE_ENV: production
+      BACKEND_URL: http://backend:5000
+      # Same public origin so Socket.IO / API go through nginx
+      NEXT_PUBLIC_BACKEND_URL: ${NEXT_PUBLIC_BACKEND_URL:-${FRONTEND_URL}}
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+    depends_on:
+      - backend
+
+  dev-nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/dev-nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - frontend
+      - backend
+
+volumes:
+  taksha_redis_data:
+  taksha_logos:

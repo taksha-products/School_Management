@@ -22,6 +22,7 @@ const nextConfig = {
   },
   async redirects() {
     return [
+      { source: "/", destination: "/parent/login", permanent: false },
       { source: "/admin/buses", destination: "/admin/transport/buses", permanent: true },
       { source: "/admin/expenses", destination: "/admin/transport/expenses", permanent: true },
       { source: "/admin/fee-structure", destination: "/admin/fees/structure", permanent: true },
