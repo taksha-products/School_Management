@@ -824,11 +824,11 @@ authRouter.post(
         return;
       }
 
+      // OTP_DEBUG=true returns the code in the API (shown on parent login UI) for staging/local testing.
+      // Keep false in real production once SMS is live.
       res.json({
         ...genericSuccess,
-        ...(process.env.NODE_ENV !== "production" && process.env.OTP_DEBUG === "true"
-          ? { debugOtp: otp }
-          : {})
+        ...(process.env.OTP_DEBUG === "true" ? { debugOtp: otp } : {})
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to send OTP";
