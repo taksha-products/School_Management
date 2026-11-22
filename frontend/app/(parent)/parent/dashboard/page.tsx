@@ -2,17 +2,20 @@
 
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
-import { Bus, ChevronRight, CreditCard } from "lucide-react";
+import { ArrowRight, BookOpen, Palette, PencilRuler, School } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import { useEffect, useState, type JSX } from "react";
 
+import { ParentBrandHeader } from "@/components/parent/ParentBrandHeader";
+import { PastelDecor } from "@/components/parent/PastelDecor";
 import { useAcademicYear } from "@/hooks/useAcademicYear";
-import { LiveStateChip } from "@/components/parent/LiveStateChip";
-import { TrackBusLink } from "@/components/parent/TrackBusLink";
-import { Card } from "@/components/ui/Card";
 import { bootstrapSession, getUser } from "@/lib/auth";
 import { api } from "@/lib/api";
+import { INK, pastelAt } from "@/lib/pastel";
 import { formatINR } from "@/lib/utils";
 import type { Student } from "@/types";
-import { useEffect, useState, type JSX } from "react";
+
+const CARD_ICONS: LucideIcon[] = [BookOpen, PencilRuler, School, Palette];
 
 const ParentDashboardPage = (): JSX.Element => {
   const [firstName, setFirstName] = useState("Parent");
@@ -34,33 +37,18 @@ const ParentDashboardPage = (): JSX.Element => {
 
   return (
     <div>
-      <div className="mb-8 rounded-2xl border border-gray-200 bg-gradient-to-br from-primary-50 via-white to-white px-6 py-7">
-        <p className="text-sm font-medium text-gray-500">Home</p>
-        <h1 className="mt-1 text-3xl font-extrabold tracking-tight text-gray-900">
-          Hi, {firstName}
-        </h1>
-        <p className="mt-2 max-w-xl text-sm text-gray-600">
-          Manage your children&apos;s fees, bus and more
-        </p>
-      </div>
-
-      <div className="mb-4 flex items-end justify-between gap-3">
-        <h2 className="text-xl font-extrabold tracking-tight text-gray-900">Your Children</h2>
-        <p className="text-sm font-medium text-gray-500">
-          {children.length} {children.length === 1 ? "Child" : "Children"}
-        </p>
-      </div>
+      <ParentBrandHeader firstName={firstName} />
 
       {childrenQuery.isLoading ? (
-        <p className="text-sm text-gray-500">Loading children…</p>
+        <p className="py-10 text-center text-sm text-[#71717A]">Loading children…</p>
       ) : children.length === 0 ? (
-        <Card className="rounded-2xl">
-          <p className="text-sm text-gray-500">No children linked to this account.</p>
-        </Card>
+        <p className="py-10 text-center text-[15px] text-[#71717A]">
+          No children linked to this account.
+        </p>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2">
-          {children.map((child) => (
-            <ChildBalanceCard key={child._id} child={child} />
+        <div className="flex flex-col gap-3">
+          {children.map((child, index) => (
+            <ChildBalanceCard key={child._id} child={child} index={index} />
           ))}
         </div>
       )}
@@ -68,8 +56,11 @@ const ParentDashboardPage = (): JSX.Element => {
   );
 };
 
-const ChildBalanceCard = ({ child }: { child: Student }): JSX.Element => {
+const ChildBalanceCard = ({ child, index }: { child: Student; index: number }): JSX.Element => {
   const orgAcademicYear = useAcademicYear();
+  const pastel = pastelAt(index);
+  const Icon = CARD_ICONS[index % CARD_ICONS.length]!;
+
   const feesQuery = useQuery({
     queryKey: ["parent-child-fees", child._id, orgAcademicYear],
     queryFn: async () =>
@@ -81,59 +72,43 @@ const ChildBalanceCard = ({ child }: { child: Student }): JSX.Element => {
       ).data.data
   });
 
-  const balance = feesQuery.data?.summary.outstandingBalance ?? 0;
-  const busLabel = child.transport?.busNumber
-    ? `Bus ${child.transport.busNumber}`
-    : "No bus";
+  const due = feesQuery.data?.summary.outstandingBalance ?? 0;
+  const amountLabel = feesQuery.isLoading
+    ? "…"
+    : feesQuery.isError
+      ? "Fees unavailable"
+      : due > 0
+        ? `${formatINR(due)} due`
+        : "All fees paid";
 
   return (
-    <Card className="rounded-2xl p-5 shadow-sm transition hover:border-primary/40 hover:shadow-md">
-      <Link
-        href={`/parent/child/${child._id}`}
-        className="flex items-center gap-3"
-      >
-        <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-primary-50 text-xl font-bold text-primary">
-          {child.name.slice(0, 1).toUpperCase()}
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-lg font-bold text-gray-900">{child.name}</span>
-          <span className="mt-0.5 block text-sm text-gray-500">Grade {child.grade}</span>
-        </span>
-        <ChevronRight className="h-5 w-5 text-gray-400" />
-      </Link>
+    <Link
+      href={`/parent/child/${child._id}`}
+      className="relative flex h-44 flex-col justify-end overflow-hidden rounded-[20px] p-[18px] transition hover:opacity-95 active:opacity-90"
+      style={{ backgroundColor: pastel.bg }}
+    >
+      <PastelDecor pastel={pastel} icon={Icon} />
 
-      <div className="my-4 h-px bg-gray-100" />
+      <span className="absolute left-[18px] top-4 rounded-full bg-white/70 px-2.5 py-1 text-xs font-semibold text-[#3F3F46]">
+        Grade {child.grade}
+      </span>
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-xs font-medium text-gray-600">Outstanding</p>
-          <p
-            className={`mt-0.5 text-2xl font-extrabold tracking-tight ${
-              balance > 0 ? "text-rose-600" : "text-emerald-600"
-            }`}
-          >
-            {feesQuery.isLoading ? "—" : formatINR(balance)}
-          </p>
-        </div>
-        <div className="flex flex-col items-end gap-1.5">
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-primary-50 px-3 py-1.5 text-sm font-semibold text-primary">
-            <Bus className="h-4 w-4" />
-            {busLabel}
-          </span>
-          <LiveStateChip state={child.transport?.liveState} />
-        </div>
+      <div className="relative z-10 max-w-[62%]">
+        <p className="truncate text-[19px] font-bold tracking-tight" style={{ color: INK }}>
+          {child.name}
+        </p>
+        <p
+          className="mt-0.5 text-[15px] font-bold"
+          style={{ color: due > 0 ? "#DC2626" : "#2E7349" }}
+        >
+          {amountLabel}
+        </p>
+        <span className="mt-1 inline-flex items-center gap-1.5 text-[15px] text-[#52525B]">
+          View fees
+          <ArrowRight className="h-3.5 w-3.5" />
+        </span>
       </div>
-
-      <Link
-        href={`/parent/child/${child._id}`}
-        className="mt-4 flex h-12 items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-white transition hover:opacity-90"
-      >
-        <CreditCard className="h-4 w-4" />
-        View fees &amp; pay
-      </Link>
-
-      {child.transport?.trackingEnabled && <TrackBusLink studentId={child._id} />}
-    </Card>
+    </Link>
   );
 };
 

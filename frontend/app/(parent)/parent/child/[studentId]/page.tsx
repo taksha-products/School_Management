@@ -189,31 +189,30 @@ const ChildFeesPage = (): JSX.Element => {
 
   return (
     <div>
-      <Link
-        href="/parent/dashboard"
-        className="mb-4 inline-flex items-center gap-1.5 text-sm font-medium text-gray-500 hover:text-primary"
-      >
-        <ArrowLeft className="h-4 w-4" />
-        Back to children
-      </Link>
+      <div className="mb-5 pt-3">
+        <Link
+          href="/parent/dashboard"
+          aria-label="Go back"
+          className="mb-4 inline-flex h-11 w-11 items-center justify-center rounded-full bg-[#F4F5F6] text-[#141414] transition hover:bg-[#EBECEE]"
+        >
+          <ArrowLeft className="h-5 w-5" />
+        </Link>
+        <p className="text-sm text-[#A1A1AA]">Grade {ledger?.student.grade ?? child?.grade ?? "—"}</p>
+        <h1 className="mt-1 text-[30px] font-extrabold leading-tight tracking-tight text-[#141414]">
+          {ledger?.student.name ?? child?.name ?? "Student"}
+        </h1>
+      </div>
 
-      <h1 className="text-2xl font-extrabold tracking-tight text-gray-900">
-        {ledger?.student.name ?? child?.name ?? "Student"}
-      </h1>
-      <p className="mt-1 text-sm text-gray-500">
-        Grade {ledger?.student.grade ?? child?.grade ?? "—"}
-      </p>
-
-      <Card className="mt-5 rounded-2xl border-primary/15 bg-primary-50/50 p-5">
-        <p className="text-xs font-medium text-gray-500">Outstanding balance</p>
+      <div className="rounded-[20px] bg-[#F4F5F6] p-5">
+        <p className="text-[13px] text-[#A1A1AA]">Outstanding balance</p>
         <p className="mt-1 text-3xl font-extrabold tracking-tight text-rose-600">
           {formatINR(ledger?.summary.outstandingBalance ?? 0)}
         </p>
-        <div className="mt-3 flex flex-wrap gap-4 text-xs text-gray-500">
+        <div className="mt-3 flex flex-wrap gap-4 text-xs text-[#71717A]">
           <span>Paid {formatINR(ledger?.summary.totalPaid ?? 0)}</span>
           <span>Overdue {formatINR(ledger?.summary.overdueAmount ?? 0)}</span>
         </div>
-      </Card>
+      </div>
 
       {lastReceipt && (
         <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
@@ -234,10 +233,10 @@ const ChildFeesPage = (): JSX.Element => {
             key={t.id}
             type="button"
             className={cn(
-              "rounded-full px-4 py-2 text-sm font-bold transition",
+              "rounded-full px-4 py-2.5 text-sm font-bold transition",
               tab === t.id
-                ? "bg-primary text-white"
-                : "border border-gray-200 bg-white text-gray-600 hover:text-primary"
+                ? "bg-[#141414] text-white"
+                : "bg-[#F4F5F6] text-[#52525B] hover:text-[#141414]"
             )}
             onClick={() => setTab(t.id)}
           >

@@ -184,7 +184,7 @@ const ParentBusContent = ({ studentId }: { studentId: string }): JSX.Element => 
   const showMap = view.state === "running" && view.position !== null && view.bus !== null;
 
   return (
-    <div className="mx-auto max-w-3xl pb-8">
+    <div className={showMap ? "-mx-4" : "pb-6"}>
       <h1 className="sr-only">{view.studentName}&apos;s bus</h1>
 
       {showMap && view.position && view.bus ? (
@@ -204,11 +204,11 @@ const ParentBusContent = ({ studentId }: { studentId: string }): JSX.Element => 
           <BusPageControls currentStudentId={studentId} />
 
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-            <p className="text-2xl font-extrabold tracking-tight text-gray-900">
+            <p className="text-[26px] font-extrabold tracking-tight text-[#141414]">
               {view.studentName}&apos;s bus
             </p>
             {view.bus?.routeNumber && (
-              <span className="rounded-lg bg-primary-50 px-3 py-1 text-base font-extrabold text-primary">
+              <span className="rounded-lg bg-[#F4F5F6] px-3 py-1 text-base font-extrabold text-[#141414]">
                 {view.bus.routeNumber}
               </span>
             )}
@@ -219,7 +219,6 @@ const ParentBusContent = ({ studentId }: { studentId: string }): JSX.Element => 
           {view.bus && <BusDetails view={view} />}
         </div>
       )}
-
     </div>
   );
 };

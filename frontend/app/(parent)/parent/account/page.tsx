@@ -2,20 +2,20 @@
 
 import { useEffect, useState, type JSX } from "react";
 import {
+  Bell,
   ChevronRight,
   CircleHelp,
   Info,
   LogOut,
-  Bell,
-  Settings,
-  User
+  Settings
 } from "lucide-react";
 
+import { ParentBrandHeader } from "@/components/parent/ParentBrandHeader";
 import { BrandLogo } from "@/components/shared/BrandLogo";
-import { Card } from "@/components/ui/Card";
 import { useToast } from "@/components/ui/Toast";
 import { useOrgTheme } from "@/hooks/useOrgTheme";
 import { bootstrapSession, logout, type AuthUser } from "@/lib/auth";
+import { INK, pastelAt, SOFT_TEXT, SUCCESS_GREEN, TILE } from "@/lib/pastel";
 
 const menuItems = [
   {
@@ -38,9 +38,9 @@ const menuItems = [
   },
   {
     key: "about",
-    label: "About",
+    label: "About App",
     icon: Info,
-    message: "EduNex Parent Portal — branding is set by your school."
+    message: "EduNex Parent — fees, bus tracking, and school updates. Branding is set by your school."
   }
 ] as const;
 
@@ -48,75 +48,98 @@ const ParentAccountPage = (): JSX.Element => {
   const { showToast } = useToast();
   const { theme, displayLabel } = useOrgTheme();
   const [user, setUser] = useState<AuthUser | null>(null);
+  const avatarPastel = pastelAt(2);
 
   useEffect(() => {
     void bootstrapSession().then(setUser);
   }, []);
 
   const phone = user?.phone ? `+91 ${user.phone}` : "Phone not set";
+  const [firstName, ...rest] = (user?.name ?? "Parent").split(" ");
+  const initial = (user?.name ?? "P").slice(0, 1).toUpperCase();
 
   return (
     <div>
-      <div className="mb-6 rounded-2xl border border-gray-200 bg-gradient-to-br from-primary-50 via-white to-white px-6 py-7">
-        <h1 className="text-3xl font-extrabold tracking-tight text-gray-900">Profile</h1>
-        <p className="mt-1 text-sm text-gray-500">Your parent account</p>
+      <ParentBrandHeader title="Profile" tagline="Your parent account" />
+
+      <div
+        className="relative mb-3 flex min-h-[190px] items-end overflow-hidden rounded-[20px] p-[22px]"
+        style={{ backgroundColor: TILE }}
+      >
+        <div className="relative z-10 min-w-0 flex-1 pr-4">
+          <p className="text-[13px]" style={{ color: SOFT_TEXT }}>
+            Parent account
+          </p>
+          <p className="mt-1 text-[26px] font-extrabold leading-tight tracking-tight" style={{ color: INK }}>
+            {firstName}
+            {rest.length ? (
+              <>
+                <br />
+                {rest.join(" ")}
+              </>
+            ) : null}
+          </p>
+          <span
+            className="mt-3 inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-sm font-semibold text-white"
+            style={{ backgroundColor: SUCCESS_GREEN }}
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-white" />
+            {phone}
+          </span>
+        </div>
+        <span
+          className="flex h-[120px] w-[120px] shrink-0 items-center justify-center rounded-full text-[48px] font-extrabold"
+          style={{ backgroundColor: avatarPastel.bg, color: avatarPastel.accent }}
+        >
+          {initial}
+        </span>
       </div>
 
-      <Card className="mb-4 rounded-2xl p-5">
-        <div className="flex items-center gap-4">
-          <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-primary-50 text-primary">
-            <User className="h-8 w-8" />
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-xl font-bold text-gray-900">{user?.name ?? "Parent"}</p>
-            <p className="mt-1 text-base text-gray-500">{phone}</p>
-          </div>
+      <div
+        className="mb-3 flex items-center gap-3 rounded-[20px] px-4 py-3.5"
+        style={{ backgroundColor: TILE }}
+      >
+        <span className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white">
+          <BrandLogo compact />
+        </span>
+        <div className="min-w-0">
+          <p className="text-[13px]" style={{ color: SOFT_TEXT }}>
+            School
+          </p>
+          <p className="truncate text-[17px] font-bold" style={{ color: INK }}>
+            {theme.orgName || displayLabel}
+          </p>
         </div>
-      </Card>
+      </div>
 
-      <Card className="mb-4 rounded-2xl p-5">
-        <div className="flex items-center gap-4">
-          <span className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary-50">
-            <BrandLogo compact />
-          </span>
-          <div className="min-w-0">
-            <p className="text-xs font-medium text-gray-500">School</p>
-            <p className="truncate text-lg font-bold text-gray-900">
-              {theme.orgName || displayLabel}
-            </p>
-            {theme.displayName ? (
-              <p className="truncate text-sm text-gray-500">{theme.displayName}</p>
-            ) : null}
-          </div>
-        </div>
-      </Card>
-
-      <Card className="mb-6 rounded-2xl p-0" flush>
+      <div className="mb-5 overflow-hidden rounded-[20px]" style={{ backgroundColor: TILE }}>
         <ul>
           {menuItems.map((item, index) => {
             const Icon = item.icon;
             return (
               <li key={item.key}>
-                {index > 0 ? <div className="mx-5 h-px bg-gray-100" /> : null}
+                {index > 0 ? <div className="mx-4 h-px bg-[#E8E8E8]" /> : null}
                 <button
                   type="button"
                   onClick={() => showToast("info", item.message)}
-                  className="flex w-full items-center gap-4 px-5 py-4 text-left transition hover:bg-gray-50"
+                  className="flex w-full items-center gap-3 px-4 py-4 text-left transition hover:bg-black/[0.02]"
                 >
-                  <Icon className="h-5 w-5 text-primary" />
-                  <span className="flex-1 text-sm font-medium text-gray-900">{item.label}</span>
-                  <ChevronRight className="h-4 w-4 text-gray-400" />
+                  <span className="flex h-10 w-10 items-center justify-center rounded-full bg-white">
+                    <Icon className="h-5 w-5 text-[#141414]" />
+                  </span>
+                  <span className="flex-1 text-base font-medium text-[#141414]">{item.label}</span>
+                  <ChevronRight className="h-4 w-4" style={{ color: SOFT_TEXT }} />
                 </button>
               </li>
             );
           })}
         </ul>
-      </Card>
+      </div>
 
       <button
         type="button"
         onClick={() => void logout()}
-        className="flex h-14 w-full items-center justify-center gap-2 rounded-xl border-2 border-rose-500 bg-white text-base font-bold text-rose-600 transition hover:bg-rose-50"
+        className="flex h-[54px] w-full items-center justify-center gap-2 rounded-full border-[1.5px] border-rose-600 bg-white text-base font-bold text-rose-600 transition hover:bg-rose-50"
       >
         <LogOut className="h-5 w-5" />
         Log out
