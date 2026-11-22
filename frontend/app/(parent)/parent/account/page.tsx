@@ -15,7 +15,7 @@ import { BrandLogo } from "@/components/shared/BrandLogo";
 import { useToast } from "@/components/ui/Toast";
 import { useOrgTheme } from "@/hooks/useOrgTheme";
 import { bootstrapSession, logout, type AuthUser } from "@/lib/auth";
-import { INK, pastelAt, SOFT_TEXT, SUCCESS_GREEN, TILE } from "@/lib/pastel";
+import { INK, pastelAt, SOFT_TEXT, SUCCESS_GREEN } from "@/lib/pastel";
 
 const menuItems = [
   {
@@ -62,10 +62,8 @@ const ParentAccountPage = (): JSX.Element => {
     <div>
       <ParentBrandHeader title="Profile" tagline="Your parent account" />
 
-      <div
-        className="relative mb-3 flex min-h-[190px] items-end overflow-hidden rounded-[20px] p-[22px]"
-        style={{ backgroundColor: TILE }}
-      >
+      <div className="md:grid md:grid-cols-2 md:gap-4">
+      <div className="relative mb-3 flex min-h-[190px] items-end overflow-hidden rounded-[20px] bg-[#F4F5F6] p-[22px] md:mb-0 md:border md:border-gray-200 md:bg-white md:shadow-sm">
         <div className="relative z-10 min-w-0 flex-1 pr-4">
           <p className="text-[13px]" style={{ color: SOFT_TEXT }}>
             Parent account
@@ -95,10 +93,7 @@ const ParentAccountPage = (): JSX.Element => {
         </span>
       </div>
 
-      <div
-        className="mb-3 flex items-center gap-3 rounded-[20px] px-4 py-3.5"
-        style={{ backgroundColor: TILE }}
-      >
+      <div className="mb-3 flex items-center gap-3 rounded-[20px] bg-[#F4F5F6] px-4 py-3.5 md:mb-0 md:border md:border-gray-200 md:bg-white md:shadow-sm">
         <span className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white">
           <BrandLogo compact />
         </span>
@@ -111,8 +106,9 @@ const ParentAccountPage = (): JSX.Element => {
           </p>
         </div>
       </div>
+      </div>
 
-      <div className="mb-5 overflow-hidden rounded-[20px]" style={{ backgroundColor: TILE }}>
+      <div className="mb-5 mt-3 overflow-hidden rounded-[20px] bg-[#F4F5F6] md:border md:border-gray-200 md:bg-white md:shadow-sm">
         <ul>
           {menuItems.map((item, index) => {
             const Icon = item.icon;
@@ -139,7 +135,7 @@ const ParentAccountPage = (): JSX.Element => {
       <button
         type="button"
         onClick={() => void logout()}
-        className="flex h-[54px] w-full items-center justify-center gap-2 rounded-full border-[1.5px] border-rose-600 bg-white text-base font-bold text-rose-600 transition hover:bg-rose-50"
+        className="flex h-[54px] w-full items-center justify-center gap-2 rounded-full border-[1.5px] border-rose-600 bg-white text-base font-bold text-rose-600 transition hover:bg-rose-50 md:max-w-sm"
       >
         <LogOut className="h-5 w-5" />
         Log out

@@ -76,7 +76,7 @@ const ParentBusPage = (): JSX.Element => {
       ) : (
         <>
           {buses.length > 0 ? (
-            <div className="mb-2 flex snap-x snap-mandatory gap-3 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div className="mb-2 flex snap-x snap-mandatory gap-3 overflow-x-auto pb-2 [scrollbar-width:none] md:grid md:snap-none md:grid-cols-2 md:overflow-visible md:pb-0 [&::-webkit-scrollbar]:hidden">
               {buses.map((bus) => {
                 const status = liveStatus(bus.children[0]?.transport);
                 const href = bus.children[0]?.transport?.trackingEnabled
@@ -86,7 +86,7 @@ const ParentBusPage = (): JSX.Element => {
                   <Link
                     key={bus.busNumber}
                     href={href}
-                    className="relative h-[200px] w-[min(100%,340px)] shrink-0 snap-center overflow-hidden rounded-[22px] p-5 transition hover:opacity-95"
+                    className="relative h-[200px] w-[min(100%,340px)] shrink-0 snap-center overflow-hidden rounded-[22px] p-5 transition hover:opacity-95 md:w-auto md:shadow-sm md:hover:shadow-md"
                     style={{ backgroundColor: TILE }}
                   >
                     <div className="relative z-10 max-w-[58%]">
@@ -125,7 +125,7 @@ const ParentBusPage = (): JSX.Element => {
           <h2 className="mb-3 mt-6 text-[19px] font-bold" style={{ color: INK }}>
             Your children
           </h2>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4">
             {children.map((child, index) => {
               const pastel = pastelAt(index);
               const bus = child.transport;

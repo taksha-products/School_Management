@@ -53,8 +53,8 @@ const TABS: Tab[] = [
 ];
 
 /**
- * Floating glass bottom nav — mobile Parent app look on web.
- * Active tab sits in a raised white circle with a soft brand glow.
+ * Floating glass bottom nav — phone browsers only.
+ * Desktop uses ParentDesktopHeader instead.
  */
 export const ParentTabBar = (): JSX.Element => {
   const pathname = usePathname();
@@ -63,7 +63,7 @@ export const ParentTabBar = (): JSX.Element => {
   return (
     <nav
       aria-label="Parent"
-      className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+      className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:hidden"
     >
       <div
         className="pointer-events-auto relative flex h-[76px] w-full max-w-md items-end justify-between rounded-full border border-white/75 px-3 pb-2.5 shadow-[0_8px_32px_rgba(15,23,42,0.12)] backdrop-blur-xl"
