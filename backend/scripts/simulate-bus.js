@@ -9,6 +9,7 @@
  *   TO           "lat,lng" end                                    (default Indiranagar)
  *   SPEED_KMH    cruising speed                                   (default 35)
  *   INTERVAL_S   seconds between reports                          (default 3)
+ *   DURATION_MIN run this long, driving back and forth (default: one trip)
  *   WEBHOOK_URL, DEVICE_ID   post to the backend webhook instead of Traccar (no Traccar needed)
  *
  * Run inside the backend container (Node 18+, no dependencies):
@@ -123,45 +124,71 @@ const report = async (point, heading, kmh, battery) => {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const DURATION_MIN = Number(process.env.DURATION_MIN || 0);
+const PARK_SECONDS = 30;
+
 (async () => {
   const line = await loadRoute();
   const stepM = (SPEED_KMH / 3.6) * INTERVAL_S;
-  const points = walk(line, stepM);
-  console.log(`route: ${points.length} reports, ~${Math.round(points.length * INTERVAL_S / 60)} min at ${SPEED_KMH} km/h`);
+  const forward = walk(line, stepM);
+  console.log(`route: ${forward.length} reports, ~${Math.round(forward.length * INTERVAL_S / 60)} min at ${SPEED_KMH} km/h`);
+
+  // With DURATION_MIN the bus drives out and back along the same road until the time is up.
+  const deadline = DURATION_MIN > 0 ? Date.now() + DURATION_MIN * 60_000 : 0;
+  const timeIsUp = () => deadline > 0 && Date.now() >= deadline;
+  if (deadline) {
+    console.log(`running for ${DURATION_MIN} min, back and forth`);
+  }
 
   let battery = 90;
   let failures = 0;
-  for (let i = 0; i < points.length; i += 1) {
-    const next = points[Math.min(i + 1, points.length - 1)];
-    const heading = i < points.length - 1 ? bearing(points[i], next) : bearing(points[i - 1], points[i]);
-    // Slow down a little now and then, like traffic.
-    const kmh = i % 17 < 3 ? SPEED_KMH * 0.4 : SPEED_KMH;
+  let trip = 0;
+
+  const send = async (point, heading, kmh, label) => {
     try {
-      const status = await report(points[i], heading, kmh, battery);
-      if (status !== 200) {
+      const status = await report(point, heading, kmh, battery);
+      if (status === 200) {
+        failures = 0;
+      } else {
         failures += 1;
-        console.log(`report ${i}: HTTP ${status}`);
+        console.log(`${label}: HTTP ${status}`);
       }
     } catch (error) {
       failures += 1;
-      console.log(`report ${i}: ${error.message}`);
-    }
-    if (i % 20 === 0) {
-      battery = Math.max(20, battery - 1);
-      console.log(`report ${i}/${points.length - 1} at ${points[i][0].toFixed(5)},${points[i][1].toFixed(5)}`);
+      console.log(`${label}: ${error.message}`);
     }
     if (failures > 10) {
-      console.log("too many failures, stopping");
+      console.log("too many consecutive failures, stopping");
       process.exit(1);
     }
-    await sleep(INTERVAL_S * 1000);
-  }
-  // Parked at the destination: a few last reports with speed 0.
-  for (let i = 0; i < 3; i += 1) {
-    await report(points[points.length - 1], 0, 0, battery);
-    await sleep(INTERVAL_S * 1000);
-  }
-  console.log("arrived");
+  };
+
+  do {
+    const points = trip % 2 === 0 ? forward : [...forward].reverse();
+    for (let i = 0; i < points.length && !timeIsUp(); i += 1) {
+      const next = points[Math.min(i + 1, points.length - 1)];
+      const heading = i < points.length - 1 ? bearing(points[i], next) : bearing(points[i - 1], points[i]);
+      // Slow down a little now and then, like traffic.
+      const kmh = i % 17 < 3 ? SPEED_KMH * 0.4 : SPEED_KMH;
+      await send(points[i], heading, kmh, `trip ${trip + 1} report ${i}`);
+      if (i % 20 === 0) {
+        battery = Math.max(20, battery - 1);
+        console.log(`trip ${trip + 1}: report ${i}/${points.length - 1} at ${points[i][0].toFixed(5)},${points[i][1].toFixed(5)}`);
+      }
+      await sleep(INTERVAL_S * 1000);
+    }
+    // Parked at the end of the trip: reports with speed 0.
+    const last = points[points.length - 1];
+    const stopHeading = bearing(points[points.length - 2], last);
+    const parkReports = deadline ? Math.round(PARK_SECONDS / INTERVAL_S) : 3;
+    for (let i = 0; i < parkReports && !timeIsUp(); i += 1) {
+      await send(last, stopHeading, 0, `trip ${trip + 1} parked`);
+      await sleep(INTERVAL_S * 1000);
+    }
+    trip += 1;
+  } while (deadline > 0 && !timeIsUp());
+
+  console.log(`finished after ${trip} trip(s)`);
 })().catch((error) => {
   console.error("simulation failed:", error.message);
   process.exit(1);
