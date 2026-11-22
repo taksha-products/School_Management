@@ -6,7 +6,7 @@ import { requireOrgScope } from "../middleware/requireOrgScope";
 import { isOrgFeatureEnabled, requireFeature } from "../middleware/featureFlag";
 import { canAccessOrg, isParent } from "../middleware/roleCheck";
 import { Bus } from "../models/Bus";
-import { SchoolFeePayment } from "../models/SchoolFeePayment";
+import { COMPLETED_PAYMENT_FILTER, SchoolFeePayment } from "../models/SchoolFeePayment";
 import { Student } from "../models/Student";
 import { StudentTransport } from "../models/StudentTransport";
 import {
@@ -234,7 +234,8 @@ parentRouter.get(
 
     const filter: Record<string, unknown> = {
       ...orgFilter(authReq, res),
-      studentId
+      studentId,
+      ...COMPLETED_PAYMENT_FILTER
     };
     if (academicYear) {
       filter.academicYear = academicYear;
@@ -264,7 +265,8 @@ parentRouter.get(
 
     const payment = await SchoolFeePayment.findOne({
       organizationId: orgId,
-      receiptNumber
+      receiptNumber,
+      ...COMPLETED_PAYMENT_FILTER
     });
 
     if (!payment) {

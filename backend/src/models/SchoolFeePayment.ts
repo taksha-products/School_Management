@@ -103,6 +103,13 @@ schoolFeePaymentSchema.index({ organizationId: 1, collectedBy: 1 });
 schoolFeePaymentSchema.index({ razorpayOrderId: 1 }, { sparse: true });
 schoolFeePaymentSchema.index({ razorpayPaymentId: 1 }, { unique: true, sparse: true });
 
+/**
+ * Only real (completed) payments. Online checkouts create a `pending` record
+ * when started; those must not appear as receipts or count as collected money
+ * until verified. Older records have no status and count as completed.
+ */
+export const COMPLETED_PAYMENT_FILTER = { paymentStatus: { $ne: "pending" } } as const;
+
 export const SchoolFeePayment = model<ISchoolFeePayment>(
   "SchoolFeePayment",
   schoolFeePaymentSchema
