@@ -13,6 +13,7 @@ import { BusPageControls } from "@/components/parent/BusPageControls";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { api } from "@/lib/api";
+import { nextPollDelay, PollHealth, POLL_REQUEST_TIMEOUT_MS } from "@/lib/polling";
 import type { ParentBusState, ParentBusView, ParentTrailPoint } from "@/types/parentBus";
 
 // Phones: the map fills the screen under the header and the panel overlays its bottom.
@@ -45,6 +46,20 @@ const shouldRetry = (failureCount: number, error: unknown): boolean => {
   }
   return failureCount < MAX_RETRIES;
 };
+
+/**
+ * Retry policy that also tells the poll tracker when a whole round has failed (the last retry
+ * is used up, or the error is final), so one bad round counts once, not once per attempt.
+ */
+const retryAndTrack =
+  (health: PollHealth) =>
+  (failureCount: number, error: unknown): boolean => {
+    const again = shouldRetry(failureCount, error);
+    if (!again) {
+      health.failed(error);
+    }
+    return again;
+  };
 
 const errorMessage = (error: unknown): string => {
   const status = (error as AxiosError).response?.status;
@@ -90,17 +105,35 @@ const PageSkeleton = (): JSX.Element => (
 );
 
 const ParentBusContent = ({ studentId }: { studentId: string }): JSX.Element => {
+  // How each polled request is doing, so polling can back off when the server struggles.
+  const [busHealth] = useState(() => new PollHealth());
+  const [trailHealth] = useState(() => new PollHealth());
+
   const busQuery = useQuery({
     queryKey: ["parent-child-bus", studentId],
-    queryFn: async ({ signal }) =>
-      (await api.get<{ data: ParentBusView }>(`/api/parent/children/${studentId}/bus`, { signal }))
-        .data.data,
-    // Poll faster while the bus runs; react-query pauses polling in background tabs.
+    queryFn: async ({ signal }) => {
+      const view = (
+        await api.get<{ data: ParentBusView }>(`/api/parent/children/${studentId}/bus`, {
+          signal,
+          timeout: POLL_REQUEST_TIMEOUT_MS
+        })
+      ).data.data;
+      busHealth.succeeded();
+      return view;
+    },
+    // Poll faster while the bus runs (react-query pauses polling in background tabs), slow down
+    // after failures, and stop when the answer is final (not found / not allowed).
     refetchInterval: (query) =>
-      query.state.data?.state === "running" ? RUNNING_POLL_MS : IDLE_POLL_MS,
+      busHealth.stopped
+        ? false
+        : nextPollDelay(
+            query.state.data?.state === "running" ? RUNNING_POLL_MS : IDLE_POLL_MS,
+            busHealth.failures,
+            busHealth.retryAfterMs
+          ),
     refetchIntervalInBackground: false,
     staleTime: DATA_STALE_MS,
-    retry: shouldRetry
+    retry: retryAndTrack(busHealth)
   });
 
   const view = busQuery.data;
@@ -109,17 +142,23 @@ const ParentBusContent = ({ studentId }: { studentId: string }): JSX.Element => 
   const trailQuery = useQuery({
     queryKey: ["parent-child-bus-trail", studentId],
     enabled: isRunning,
-    queryFn: async ({ signal }) =>
-      (
+    queryFn: async ({ signal }) => {
+      const points = (
         await api.get<{ data: { points: ParentTrailPoint[] } }>(
           `/api/parent/children/${studentId}/bus/trail`,
-          { signal }
+          { signal, timeout: POLL_REQUEST_TIMEOUT_MS }
         )
-      ).data.data.points,
-    refetchInterval: TRAIL_POLL_MS,
+      ).data.data.points;
+      trailHealth.succeeded();
+      return points;
+    },
+    refetchInterval: () =>
+      trailHealth.stopped
+        ? false
+        : nextPollDelay(TRAIL_POLL_MS, trailHealth.failures, trailHealth.retryAfterMs),
     refetchIntervalInBackground: false,
     staleTime: TRAIL_STALE_MS,
-    retry: shouldRetry
+    retry: retryAndTrack(trailHealth)
   });
 
   // Extend the stored trail with each position seen while the page is open.
