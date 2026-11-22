@@ -6,16 +6,17 @@
 #   FRONTEND_URL=https://edunex.taaksha.com
 #   NEXT_PUBLIC_BACKEND_URL=https://edunex.taaksha.com
 #   COOKIE_SECURE=true
+#   TRACCAR_URL=http://traccar:8082
+#   TRACCAR_TOKEN=...   (or TRACCAR_USER + TRACCAR_PASSWORD)
+#   TRACCAR_WEBHOOK_SECRET=...
 #
-# GPS tracking (Traccar), also in the server .env:
-#   TRACCAR_WEBHOOK_SECRET=<long random string>   # REQUIRED: without it the webhook refuses positions
-#   TRACCAR_TOKEN=<API token of the Traccar admin>  # created once in the Traccar web UI
-# Open the Traccar UI through an SSH tunnel (ssh -L 8082:127.0.0.1:8082 user@vm), create the
-# admin account, generate a token, then restart the backend. Allow the tracker port (5055 for the
-# Traccar Client phone app, plus your hardware's port) in the VM firewall / cloud security list.
+# Traccar Client (phone app) server URL:
+#   https://edunex.taaksha.com/osmand
+# (nginx proxies to traccar:5055 — no public 5055 port, no Oracle firewall change)
+#
+# Hardware GPS trackers still need their own protocol port published (not covered by /osmand).
 #
 # TLS: place Let's Encrypt files on the host (see README steps), then:
-#   docker compose -f docker-compose.dev-nginx.yml pull
 #   docker compose -f docker-compose.dev-nginx.yml up -d
 
 services:
@@ -46,15 +47,32 @@ services:
       OTP_DEBUG: ${OTP_DEBUG:-true}
       # CORS — must match browser origin exactly
       FRONTEND_URL: ${FRONTEND_URL:-https://edunex.taaksha.com}
-      # The backend reaches Traccar by service name (token/credentials come from .env).
-      # Until TRACCAR_WEBHOOK_SECRET / TRACCAR_TOKEN are set, GPS is simply inactive (positions
-      # are refused and trackers show "sync failed"); nothing else is affected.
-      TRACCAR_URL: http://traccar:8082
+      # Reach Traccar on the compose network (not localhost)
+      TRACCAR_URL: ${TRACCAR_URL:-http://traccar:8082}
     volumes:
       - taksha_logos:/app/public/logos
     depends_on:
       redis:
         condition: service_healthy
+
+  # GPS: Traccar stays internal. Phones use https://edunex.taaksha.com/osmand
+  # (nginx → traccar:5055). Do not publish 5055/8082 on the host.
+  traccar:
+    image: traccar/traccar:6.17.0
+    restart: unless-stopped
+    expose:
+      - "8082"
+      - "5055"
+    environment:
+      CONFIG_USE_ENVIRONMENT_VARIABLES: "true"
+      FORWARD_ENABLE: "true"
+      FORWARD_TYPE: "json"
+      FORWARD_URL: ${TRACCAR_FORWARD_URL:-http://backend:5000/api/traccar-webhook/webhook/traccar}?key=${TRACCAR_WEBHOOK_SECRET:-}
+    volumes:
+      - taksha_traccar_data:/opt/traccar/data
+      - taksha_traccar_logs:/opt/traccar/logs
+    depends_on:
+      - backend
 
   frontend:
     image: ${DOCKERHUB_USERNAME}/school-management-frontend:${IMAGE_TAG}
@@ -67,25 +85,6 @@ services:
       NEXT_PUBLIC_BACKEND_URL: ${NEXT_PUBLIC_BACKEND_URL:-https://edunex.taaksha.com}
       PORT: "3000"
       HOSTNAME: 0.0.0.0
-    depends_on:
-      - backend
-
-  # Traccar GPS server. Stock image pinned to the tested version (amd64 and arm64).
-  # Forwards every position to the backend over the internal network, with the shared secret.
-  traccar:
-    image: traccar/traccar:6.17.0
-    restart: unless-stopped
-    ports:
-      - "5055:5055"            # OsmAnd protocol (Traccar Client phone app) - open in the firewall
-      - "127.0.0.1:8082:8082"  # web UI / API - reach it through an SSH tunnel, not the internet
-    environment:
-      CONFIG_USE_ENVIRONMENT_VARIABLES: "true"
-      FORWARD_ENABLE: "true"
-      FORWARD_TYPE: "json"
-      FORWARD_URL: http://backend:5000/api/traccar-webhook/webhook/traccar?key=${TRACCAR_WEBHOOK_SECRET:-}
-    volumes:
-      - traccar_data:/opt/traccar/data
-      - traccar_logs:/opt/traccar/logs
     depends_on:
       - backend
 
@@ -102,9 +101,10 @@ services:
     depends_on:
       - frontend
       - backend
+      - traccar
 
 volumes:
   taksha_redis_data:
   taksha_logos:
-  traccar_data:
-  traccar_logs:
+  taksha_traccar_data:
+  taksha_traccar_logs:

@@ -1,18 +1,40 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useRouter } from "next/navigation";
-import { useEffect } from "react";
-import { Bus, Navigation } from "lucide-react";
+import Link from "next/link";
+import { Bus } from "lucide-react";
+import { useMemo, type JSX } from "react";
 
-import { LiveStateChip } from "@/components/parent/LiveStateChip";
-import { TrackBusLink } from "@/components/parent/TrackBusLink";
-import { Badge } from "@/components/ui/Badge";
-import { Card } from "@/components/ui/Card";
+import { ParentBrandHeader } from "@/components/parent/ParentBrandHeader";
 import { api } from "@/lib/api";
-import { formatINR } from "@/lib/utils";
+import { INK, pastelAt, SOFT_TEXT, TILE } from "@/lib/pastel";
 import type { Student } from "@/types";
-import type { JSX } from "react";
+
+const liveStatus = (
+  transport?: Student["transport"]
+): { label: string; color: string } => {
+  if (!transport?.busNumber) {
+    return { label: "No bus", color: "#D4D4D8" };
+  }
+  switch (transport.liveState) {
+    case "live":
+      return { label: "Moving now", color: "#4CB963" };
+    case "stopped":
+      return { label: "Stopped", color: "#EA8A3B" };
+    case "not_running":
+      return { label: "Not running", color: "#A1A1AA" };
+    default:
+      return transport.trackingEnabled
+        ? { label: "Track bus", color: "#4CB963" }
+        : { label: "Tracking unavailable", color: "#A1A1AA" };
+  }
+};
+
+interface BusGroup {
+  busNumber: string;
+  routeName?: string;
+  children: Student[];
+}
 
 const ParentBusPage = (): JSX.Element => {
   const childrenQuery = useQuery({
@@ -22,97 +44,128 @@ const ParentBusPage = (): JSX.Element => {
   });
 
   const children = childrenQuery.data ?? [];
-  const router = useRouter();
 
-  // One child with live tracking: skip the list and open the bus directly.
-  const trackable = children.filter((child) => child.transport?.trackingEnabled);
-  const onlyChildId = children.length === 1 && trackable.length === 1 ? trackable[0]?._id : undefined;
-  useEffect(() => {
-    if (onlyChildId) {
-      router.replace(`/parent/child/${onlyChildId}/bus`);
+  const buses = useMemo<BusGroup[]>(() => {
+    const map = new Map<string, BusGroup>();
+    for (const child of children) {
+      const busNumber = child.transport?.busNumber;
+      if (!busNumber) {
+        continue;
+      }
+      const group = map.get(busNumber) ?? {
+        busNumber,
+        routeName: child.transport?.routeName,
+        children: []
+      };
+      group.children.push(child);
+      map.set(busNumber, group);
     }
-  }, [onlyChildId, router]);
+    return [...map.values()];
+  }, [children]);
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-extrabold tracking-tight text-gray-900">Bus</h1>
-        <p className="mt-1 text-sm text-gray-500">Transport for your children</p>
-      </div>
+      <ParentBrandHeader title="Bus" tagline="Track your child's school bus" />
 
       {childrenQuery.isLoading ? (
-        <p className="text-sm text-gray-500">Loading bus details…</p>
+        <p className="py-10 text-center text-sm text-[#71717A]">Loading bus details…</p>
       ) : children.length === 0 ? (
-        <Card className="rounded-2xl">
-          <p className="text-sm text-gray-500">No children linked to this account.</p>
-        </Card>
+        <p className="py-10 text-center text-[15px] text-[#71717A]">
+          No children linked to this account.
+        </p>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2">
-          {children.map((child) => {
-            const bus = child.transport;
-            return (
-              <Card key={child._id} className="rounded-2xl p-5">
-                <div className="flex items-center gap-3">
-                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary-50 text-base font-extrabold text-primary">
-                    {child.name.slice(0, 1).toUpperCase()}
-                  </span>
-                  <div className="min-w-0">
-                    <p className="truncate font-bold text-gray-900">{child.name}</p>
-                    <p className="text-sm text-gray-500">Grade {child.grade}</p>
-                  </div>
-                </div>
-
-                {bus?.busNumber ? (
-                  <div className="mt-4 space-y-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-primary-50 px-3 py-1 text-sm font-semibold text-primary">
-                        <Bus className="h-4 w-4" />
+        <>
+          {buses.length > 0 ? (
+            <div className="mb-2 flex snap-x snap-mandatory gap-3 overflow-x-auto pb-2 [scrollbar-width:none] md:grid md:snap-none md:grid-cols-2 md:overflow-visible md:pb-0 [&::-webkit-scrollbar]:hidden">
+              {buses.map((bus) => {
+                const status = liveStatus(bus.children[0]?.transport);
+                const href = bus.children[0]?.transport?.trackingEnabled
+                  ? `/parent/child/${bus.children[0]._id}/bus`
+                  : `/parent/child/${bus.children[0]!._id}`;
+                return (
+                  <Link
+                    key={bus.busNumber}
+                    href={href}
+                    className="relative h-[200px] w-[min(100%,340px)] shrink-0 snap-center overflow-hidden rounded-[22px] p-5 transition hover:opacity-95 md:w-auto md:shadow-sm md:hover:shadow-md"
+                    style={{ backgroundColor: TILE }}
+                  >
+                    <div className="relative z-10 max-w-[58%]">
+                      <p className="text-[13px]" style={{ color: SOFT_TEXT }}>
                         Bus {bus.busNumber}
+                      </p>
+                      <p
+                        className="mt-1 text-[26px] font-extrabold leading-tight tracking-tight"
+                        style={{ color: INK }}
+                      >
+                        {bus.routeName ?? "School route"}
+                      </p>
+                      <span
+                        className="mt-3 inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-sm font-semibold text-white"
+                        style={{ backgroundColor: status.color }}
+                      >
+                        <span className="h-1.5 w-1.5 rounded-full bg-white" />
+                        {status.label}
                       </span>
-                      <LiveStateChip state={bus.liveState} />
                     </div>
-                    {bus.routeName ? (
-                      <p className="text-sm font-semibold text-gray-900">{bus.routeName}</p>
-                    ) : null}
-                    {(bus.pickupStop || bus.dropStop) && (
-                      <p className="text-sm text-gray-500">
-                        {[
-                          bus.pickupStop ? `Pickup: ${bus.pickupStop}` : null,
-                          bus.dropStop ? `Drop: ${bus.dropStop}` : null
-                        ]
-                          .filter(Boolean)
-                          .join(" · ")}
-                      </p>
-                    )}
-                    {typeof bus.monthlyTransportFee === "number" && bus.monthlyTransportFee > 0 ? (
-                      <p className="text-sm text-gray-600">
-                        Monthly fee{" "}
-                        <span className="font-semibold text-gray-900">
-                          {formatINR(bus.monthlyTransportFee)}
-                        </span>
-                      </p>
-                    ) : null}
-                    <div className="border-t border-gray-100 pt-3">
-                      {bus.trackingEnabled ? (
-                        <TrackBusLink studentId={child._id} />
-                      ) : (
-                        <div className="flex items-center gap-2">
-                          <Navigation className="h-4 w-4 text-gray-400" />
-                          <span className="flex-1 text-sm text-gray-500">Live bus tracking</span>
-                          <Badge status="pending">Not available</Badge>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ) : (
-                  <p className="mt-4 text-sm text-gray-500">
-                    No bus assigned for this child.
+                    <span
+                      aria-hidden="true"
+                      className="absolute -bottom-6 -right-4 h-36 w-36 rounded-full bg-[#EBECEE]"
+                    />
+                    <Bus
+                      aria-hidden="true"
+                      className="absolute bottom-4 right-4 h-28 w-28 text-[#E2A93B]"
+                      strokeWidth={1.25}
+                    />
+                  </Link>
+                );
+              })}
+            </div>
+          ) : null}
+
+          <h2 className="mb-3 mt-6 text-[19px] font-bold" style={{ color: INK }}>
+            Your children
+          </h2>
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4">
+            {children.map((child, index) => {
+              const pastel = pastelAt(index);
+              const bus = child.transport;
+              const status = liveStatus(bus);
+              const canTrack = Boolean(bus?.busNumber);
+              const href = bus?.trackingEnabled
+                ? `/parent/child/${child._id}/bus`
+                : `/parent/child/${child._id}`;
+              return (
+                <Link
+                  key={child._id}
+                  href={canTrack ? href : `/parent/child/${child._id}`}
+                  className={`relative flex flex-col items-center rounded-[18px] px-3 py-5 text-center transition ${
+                    canTrack ? "hover:opacity-95" : "opacity-70"
+                  }`}
+                  style={{ backgroundColor: TILE }}
+                >
+                  <span className="relative">
+                    <span
+                      className="flex h-16 w-16 items-center justify-center rounded-full text-2xl font-extrabold"
+                      style={{ backgroundColor: pastel.bg, color: pastel.accent }}
+                    >
+                      {child.name.slice(0, 1).toUpperCase()}
+                    </span>
+                    <span
+                      className="absolute bottom-0 right-0 h-3.5 w-3.5 rounded-full border-2 border-white"
+                      style={{ backgroundColor: status.color }}
+                    />
+                  </span>
+                  <p className="mt-3 w-full truncate text-base font-semibold" style={{ color: INK }}>
+                    {child.name.split(" ")[0]}
                   </p>
-                )}
-              </Card>
-            );
-          })}
-        </div>
+                  <p className="mt-0.5 text-[13px]" style={{ color: SOFT_TEXT }}>
+                    {bus?.busNumber ? `Bus ${bus.busNumber}` : "No bus"}
+                  </p>
+                </Link>
+              );
+            })}
+          </div>
+        </>
       )}
     </div>
   );

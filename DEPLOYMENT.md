@@ -45,13 +45,7 @@ docker build ./frontend \
 ## Staging on the Oracle VM (docker-compose.dev-nginx.yml)
 
 - nginx serves the site, the API and `/socket.io/` on **one address**. The frontend image is built without `NEXT_PUBLIC_BACKEND_URL`, so the browser uses its own origin.
-- The compose file includes Traccar (`traccar/traccar:6.17.0`, amd64 and arm64). It forwards every position to the backend over the internal network. The deploy pipeline syncs the compose file and runs `docker compose up -d`, so Traccar starts with the next deploy.
-- **One-time setup on the VM** (GPS stays inactive until this is done; everything else works):
-  1. Add `TRACCAR_WEBHOOK_SECRET=<long random string>` to the server `.env`, then deploy.
-  2. Reach the Traccar UI through a tunnel: `ssh -L 8082:127.0.0.1:8082 user@vm`, open `http://localhost:8082`, create the admin account, then generate a token (account menu, Preferences, Token).
-  3. Add `TRACCAR_TOKEN=<token>` to `.env` and restart the backend: `docker compose -f docker-compose.dev-nginx.yml up -d backend`.
-  4. Open tracker port **5055** (Traccar Client phone app) in the cloud security list and the VM firewall. The Traccar UI (8082) stays bound to `127.0.0.1`.
-  5. Turn on `gpsTracking` for the school (super admin screen), add a bus, and give it a tracker.
+- **GPS on staging (`docker-compose.dev-nginx.yml`):** Traccar runs on the compose network only (ports 8082 / 5055 are **not** published on the host). Phone apps send positions to **`https://edunex.taaksha.com/osmand`**; nginx proxies that path to `traccar:5055`. Set `TRACCAR_URL=http://traccar:8082`, `TRACCAR_TOKEN` (or user/password), and `TRACCAR_WEBHOOK_SECRET` on the server. Hardware trackers that use another protocol still need their own public port (nginx HTTP cannot replace that).
 
 ## Requirements and behaviour to know
 
@@ -67,9 +61,24 @@ docker build ./frontend \
 
 - Pin the image version (done) and upgrade deliberately.
 - The default embedded database is for testing. Configure MySQL or PostgreSQL for production and back it up.
-- Open only the device port(s) your tracker model uses (compose publishes 5055 for the phone app and 5027 as an example). Keep the web UI/API (8082) private or behind HTTPS.
 - Disable open self-registration in Traccar after creating the admin account.
 - Traccar forwards positions to `…/api/traccar-webhook/webhook/traccar?key=<TRACCAR_WEBHOOK_SECRET>` (compose sets this from `TRACCAR_WEBHOOK_SECRET`).
+
+### Phone app (Traccar Client / OsmAnd) — HTTPS via nginx
+
+| Setting | Value |
+|---------|--------|
+| Server URL in Traccar Client | `https://edunex.taaksha.com/osmand` |
+| nginx path | `/osmand/` → `http://traccar:5055/` |
+| Public host ports | **80 / 443 only** — do not open `5055` on the Oracle VM |
+
+Benefits: encrypted traffic, no new public port, no Oracle security-list change for phones.
+
+### Hardware trackers
+
+Devices that speak a proprietary TCP protocol still need that protocol port published (compose example: `5027`). nginx `/osmand` only covers Traccar Client HTTP/OsmAnd.
+
+Keep Traccar web UI/API (`8082`) private (`expose` only in staging compose).
 
 ## Before going live
 
@@ -77,6 +86,7 @@ docker build ./frontend \
 - [ ] Set every required variable above; `NODE_ENV=production`.
 - [ ] Put the stack behind HTTPS.
 - [ ] Create the Traccar admin, add its token to the backend, set the webhook secret in both places.
+- [ ] On staging/prod: set Traccar Client Server URL to `https://edunex.taaksha.com/osmand`.
 - [ ] Turn on `gpsTracking` for the schools that should use it (super admin screen).
 - [ ] Add a real tracker (or a phone with Traccar Client) to one bus and watch it on the live map.
 - [ ] Set up MongoDB and Traccar backups.
