@@ -46,7 +46,7 @@ const ParentDashboardPage = (): JSX.Element => {
           No children linked to this account.
         </p>
       ) : (
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3 md:grid md:grid-cols-2 md:gap-4">
           {children.map((child, index) => (
             <ChildBalanceCard key={child._id} child={child} index={index} />
           ))}
@@ -84,7 +84,7 @@ const ChildBalanceCard = ({ child, index }: { child: Student; index: number }): 
   return (
     <Link
       href={`/parent/child/${child._id}`}
-      className="relative flex h-44 flex-col justify-end overflow-hidden rounded-[20px] p-[18px] transition hover:opacity-95 active:opacity-90"
+      className="relative flex h-44 flex-col justify-end overflow-hidden rounded-[20px] p-[18px] transition hover:opacity-95 active:opacity-90 md:h-48 md:shadow-sm md:hover:shadow-md"
       style={{ backgroundColor: pastel.bg }}
     >
       <PastelDecor pastel={pastel} icon={Icon} />

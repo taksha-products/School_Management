@@ -109,8 +109,8 @@ const ParentPaymentsPage = (): JSX.Element => {
     <div>
       <ParentBrandHeader title="Payments" tagline="Pay fees and view receipts" />
 
-      <div className="mb-5 flex gap-2.5">
-        <div className="flex-1 rounded-[20px] p-4" style={{ backgroundColor: TILE }}>
+      <div className="mb-5 flex gap-2.5 md:gap-4">
+        <div className="flex-1 rounded-[20px] bg-[#F4F5F6] p-4 md:border md:border-gray-200 md:bg-white md:p-5 md:shadow-sm">
           <p className="text-[13px]" style={{ color: SOFT_TEXT }}>
             Total due
           </p>
@@ -121,7 +121,7 @@ const ParentPaymentsPage = (): JSX.Element => {
             {duesQuery.isLoading ? "…" : formatINR(totalDue)}
           </p>
         </div>
-        <div className="flex-1 rounded-[20px] p-4" style={{ backgroundColor: TILE }}>
+        <div className="flex-1 rounded-[20px] bg-[#F4F5F6] p-4 md:border md:border-gray-200 md:bg-white md:p-5 md:shadow-sm">
           <p className="text-[13px]" style={{ color: SOFT_TEXT }}>
             Total paid
           </p>
@@ -140,7 +140,7 @@ const ParentPaymentsPage = (): JSX.Element => {
       ) : children.length === 0 ? (
         <p className="mb-6 text-sm text-[#71717A]">No children found.</p>
       ) : (
-        <div className="mb-6 flex flex-col gap-3">
+        <div className="mb-6 flex flex-col gap-3 md:grid md:grid-cols-2 md:gap-4">
           {children.map((child, index) => {
             const pastel = pastelAt(index);
             const Icon = CARD_ICONS[index % CARD_ICONS.length]!;
@@ -149,7 +149,7 @@ const ParentPaymentsPage = (): JSX.Element => {
               <Link
                 key={child._id}
                 href={`/parent/child/${child._id}`}
-                className="relative flex h-[150px] flex-col justify-end overflow-hidden rounded-[20px] p-[18px] transition hover:opacity-95"
+                className="relative flex h-[150px] flex-col justify-end overflow-hidden rounded-[20px] p-[18px] transition hover:opacity-95 md:h-44 md:shadow-sm md:hover:shadow-md"
                 style={{ backgroundColor: pastel.bg }}
               >
                 <PastelDecor pastel={pastel} icon={Icon} />

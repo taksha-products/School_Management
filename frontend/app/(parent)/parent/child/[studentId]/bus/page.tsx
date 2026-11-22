@@ -184,7 +184,7 @@ const ParentBusContent = ({ studentId }: { studentId: string }): JSX.Element => 
   const showMap = view.state === "running" && view.position !== null && view.bus !== null;
 
   return (
-    <div className={showMap ? "-mx-4" : "pb-6"}>
+    <div className={showMap ? "-mx-4 md:mx-0" : "pb-6"}>
       <h1 className="sr-only">{view.studentName}&apos;s bus</h1>
 
       {showMap && view.position && view.bus ? (
