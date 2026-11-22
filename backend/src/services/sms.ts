@@ -7,87 +7,132 @@ export interface SendSmsResult {
   error?: string;
 }
 
-export interface SmsProvider {
+interface SmsProvider {
   readonly name: string;
-  sendSms(toE164: string, body: string): Promise<SendSmsResult>;
+  sendOtp(toE164: string, otp: string, expiryMinutes: number): Promise<SendSmsResult>;
 }
 
 /**
- * Development / fallback provider — logs the message instead of sending SMS.
+ * Local-only provider. Enabled only when SMS_PROVIDER=console (never used automatically).
  */
 class ConsoleSmsProvider implements SmsProvider {
   readonly name = "console";
 
-  async sendSms(toE164: string, body: string): Promise<SendSmsResult> {
+  async sendOtp(toE164: string, otp: string, expiryMinutes: number): Promise<SendSmsResult> {
     // eslint-disable-next-line no-console
-    console.info(`[sms:${this.name}] to=${toE164} body=${body}`);
+    console.info(
+      `[sms:${this.name}] to=${toE164} otp=${otp} expiresInMinutes=${expiryMinutes}`
+    );
     return { success: true, provider: this.name, messageId: `console-${Date.now()}` };
   }
 }
 
 /**
- * Twilio REST API provider (no SDK dependency). Enabled when TWILIO_* env vars are set.
+ * MSG91 Send OTP (v5). Required for real SMS delivery.
+ * Docs: https://control.msg91.com/api/v5/otp
  */
-class TwilioSmsProvider implements SmsProvider {
-  readonly name = "twilio";
+class Msg91OtpProvider implements SmsProvider {
+  readonly name = "msg91";
 
   constructor(
-    private readonly accountSid: string,
-    private readonly authToken: string,
-    private readonly fromNumber: string
+    private readonly authKey: string,
+    private readonly templateId: string,
+    private readonly senderId?: string
   ) {}
 
-  async sendSms(toE164: string, body: string): Promise<SendSmsResult> {
-    const url = `https://api.twilio.com/2010-04-01/Accounts/${this.accountSid}/Messages.json`;
-    const credentials = Buffer.from(`${this.accountSid}:${this.authToken}`).toString("base64");
-
-    const form = new URLSearchParams({
-      To: toE164,
-      From: this.fromNumber,
-      Body: body
+  async sendOtp(toE164: string, otp: string, expiryMinutes: number): Promise<SendSmsResult> {
+    const mobile = toE164.replace(/\D/g, ""); // +9198… → 9198…
+    const params = new URLSearchParams({
+      template_id: this.templateId,
+      mobile,
+      otp,
+      otp_expiry: String(Math.max(1, expiryMinutes)),
+      otp_length: String(otp.length),
+      realTimeResponse: "1"
     });
+    if (this.senderId) {
+      params.set("sender", this.senderId);
+    }
+
+    const url = `https://control.msg91.com/api/v5/otp?${params.toString()}`;
 
     try {
       const response = await fetch(url, {
         method: "POST",
         headers: {
-          Authorization: `Basic ${credentials}`,
-          "Content-Type": "application/x-www-form-urlencoded"
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          authkey: this.authKey
         },
-        body: form.toString()
+        body: JSON.stringify({ OTP: otp })
       });
 
-      const payload = (await response.json()) as { sid?: string; message?: string; error_message?: string };
+      const payload = (await response.json().catch(() => ({}))) as {
+        type?: string;
+        message?: string;
+        request_id?: string;
+        code?: string | number;
+      };
 
-      if (!response.ok) {
+      const failed =
+        !response.ok ||
+        payload.type === "error" ||
+        String(payload.code ?? "") === "201";
+
+      if (failed) {
         return {
           success: false,
           provider: this.name,
-          error: payload.error_message ?? payload.message ?? `Twilio HTTP ${response.status}`
+          error: payload.message ?? `MSG91 HTTP ${response.status}`
         };
       }
 
-      return { success: true, provider: this.name, messageId: payload.sid };
+      return {
+        success: true,
+        provider: this.name,
+        messageId: payload.request_id
+      };
     } catch (error) {
       return {
         success: false,
         provider: this.name,
-        error: error instanceof Error ? error.message : "Twilio request failed"
+        error: error instanceof Error ? error.message : "MSG91 request failed"
       };
     }
   }
 }
 
-const resolveSmsProvider = (): SmsProvider => {
-  const accountSid = process.env.TWILIO_ACCOUNT_SID?.trim();
-  const authToken = process.env.TWILIO_AUTH_TOKEN?.trim();
-  const fromNumber = process.env.TWILIO_FROM_NUMBER?.trim();
+class UnconfiguredSmsProvider implements SmsProvider {
+  readonly name = "unconfigured";
 
-  if (accountSid && authToken && fromNumber) {
-    return new TwilioSmsProvider(accountSid, authToken, fromNumber);
+  async sendOtp(): Promise<SendSmsResult> {
+    return {
+      success: false,
+      provider: this.name,
+      error:
+        "SMS is not configured. Set MSG91_AUTH_KEY and MSG91_TEMPLATE_ID (or SMS_PROVIDER=console for local only)."
+    };
+  }
+}
+
+const resolveSmsProvider = (): SmsProvider => {
+  const mode = process.env.SMS_PROVIDER?.trim().toLowerCase();
+
+  if (mode === "console") {
+    return new ConsoleSmsProvider();
   }
 
-  return new ConsoleSmsProvider();
+  const authKey = process.env.MSG91_AUTH_KEY?.trim();
+  const templateId = process.env.MSG91_TEMPLATE_ID?.trim();
+  if (authKey && templateId) {
+    return new Msg91OtpProvider(
+      authKey,
+      templateId,
+      process.env.MSG91_SENDER_ID?.trim() || undefined
+    );
+  }
+
+  return new UnconfiguredSmsProvider();
 };
 
 let cachedProvider: SmsProvider | null = null;
@@ -99,6 +144,11 @@ const getSmsProvider = (): SmsProvider => {
   return cachedProvider;
 };
 
+/** Test helper — clears cached provider so env changes take effect. */
+export const resetSmsProviderForTests = (): void => {
+  cachedProvider = null;
+};
+
 /**
  * Sends a parent login OTP SMS to a normalized 10-digit Indian mobile.
  */
@@ -108,7 +158,5 @@ export const sendParentLoginOtp = async (
 ): Promise<SendSmsResult> => {
   const provider = getSmsProvider();
   const minutes = Math.max(1, Math.round(Number(process.env.OTP_TTL_SECONDS ?? 300) / 60));
-  const body = `Your Taksha login OTP is ${otp}. Valid for ${minutes} minute(s). Do not share this code.`;
-
-  return provider.sendSms(toE164IndianMobile(tenDigitPhone), body);
+  return provider.sendOtp(toE164IndianMobile(tenDigitPhone), otp, minutes);
 };

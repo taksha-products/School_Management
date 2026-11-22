@@ -2,7 +2,7 @@ import { Types } from "mongoose";
 
 import { Bus } from "../models/Bus";
 import { FeeLedger } from "../models/FeeLedger";
-import { SchoolFeePayment } from "../models/SchoolFeePayment";
+import { COMPLETED_PAYMENT_FILTER, SchoolFeePayment } from "../models/SchoolFeePayment";
 import { Student } from "../models/Student";
 import { StudentFeeAssignment } from "../models/StudentFeeAssignment";
 import { StudentTransport } from "../models/StudentTransport";
@@ -225,7 +225,8 @@ export const buildStudentFeeLedgerView = async (
   const payments = await SchoolFeePayment.find({
     organizationId: orgObjectId,
     studentId: studentObjectId,
-    academicYear
+    academicYear,
+    ...COMPLETED_PAYMENT_FILTER
   })
     .populate("collectedBy", "name")
     .sort({ paymentDate: -1 });
@@ -349,7 +350,8 @@ export const buildReceiptView = async (
 ) => {
   const payment = await SchoolFeePayment.findOne({
     organizationId: new Types.ObjectId(organizationId),
-    receiptNumber
+    receiptNumber,
+    ...COMPLETED_PAYMENT_FILTER
   })
     .populate("studentId", "name grade parentName")
     .populate("collectedBy", "name");
@@ -404,7 +406,8 @@ export const buildOrgFeeSummary = async (
 
   const paymentFilter: Record<string, unknown> = {
     organizationId: orgObjectId,
-    academicYear
+    academicYear,
+    ...COMPLETED_PAYMENT_FILTER
   };
   let payments = await SchoolFeePayment.find(paymentFilter);
 
