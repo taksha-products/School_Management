@@ -22,6 +22,7 @@ import expensesRouter from "./routes/expenses";
 import reportsRouter from "./routes/reports";
 import feeStructureRouter from "./routes/fee-structure";
 import schoolFeesRouter from "./routes/school-fees";
+import { noStore } from "./middleware/noStore";
 import parentRouter from "./routes/parent";
 import orgUsersRouter from "./routes/org/users";
 import orgOrganizationRouter from "./routes/org/organization";
@@ -169,7 +170,7 @@ app.use("/api/students", studentsRouter);
 app.use("/api/fees", feesRouter);
 app.use("/api/fee-structure", feeStructureRouter);
 app.use("/api/school-fees", schoolFeesRouter);
-app.use("/api/parent", parentRouter);
+app.use("/api/parent", noStore, parentRouter);
 app.use("/api/expenses", expensesRouter);
 app.use("/api/reports", reportsRouter);
 app.use("/api/bulk", bulkRouter);
@@ -178,6 +179,7 @@ app.use("/api/payments", auth, orgScope, requireOrgScope, paymentsRouter);
 app.use("/api/traccar-webhook", traccarWebhookRouter);
 app.use(
   "/api/gps",
+  noStore,
   auth,
   orgScope,
   requireOrgScope,
