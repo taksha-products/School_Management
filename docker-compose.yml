@@ -29,7 +29,6 @@ services:
       FRONTEND_URL: http://localhost:3000,http://localhost:8081
       NODE_ENV: development
       COOKIE_SECURE: "false"
-      OTP_DEBUG: "true"
       # Inside compose the backend reaches Traccar by service name (overrides the host-style
       # value in .env). The Traccar admin token/credentials still come from .env.
       TRACCAR_URL: http://traccar:8082
@@ -74,7 +73,6 @@ services:
       REDIS_URL: redis://redis:6379
       NODE_ENV: development
       COOKIE_SECURE: "false"
-      OTP_DEBUG: "true"
     command: ["node", "dist/seed.js"]
     depends_on:
       redis:

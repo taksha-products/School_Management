@@ -59,6 +59,7 @@ import {
 } from "../validators/auth";
 import { Types } from "mongoose";
 import { Student } from "../models/Student";
+import { isOtpDebugEnabled } from "../config/otp";
 
 const authRouter = Router();
 
@@ -813,8 +814,19 @@ authRouter.post(
         eligible.map((p) => p._id.toString())
       );
 
+      // Debug mode (OTP_DEBUG env) returns the code in the API and lets login continue
+      // when SMS fails. See config/otp.ts.
+      const otpDebug = isOtpDebugEnabled();
+
       const smsResult = await sendParentLoginOtp(phone, otp);
-      if (!smsResult.success) {
+      if (!smsResult.success && otpDebug) {
+        console.warn({
+          event: "otp_sms_failed_debug_fallback",
+          provider: smsResult.provider,
+          error: smsResult.error
+        });
+      }
+      if (!smsResult.success && !otpDebug) {
         await clearParentOtp(phone);
         res.status(503).json({
           success: false,
@@ -824,11 +836,9 @@ authRouter.post(
         return;
       }
 
-      // OTP_DEBUG=true returns the code in the API (shown on parent login UI) for staging/local testing.
-      // Keep false in real production once SMS is live.
       res.json({
         ...genericSuccess,
-        ...(process.env.OTP_DEBUG === "true" ? { debugOtp: otp } : {})
+        ...(otpDebug ? { debugOtp: otp } : {})
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to send OTP";
